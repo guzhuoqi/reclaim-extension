@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Reclaim Extension",
+  "version": "1.0.0",
+  "description": "A chrome extension for Reclaim",
+  "icons": {
+    "16": "assets/img/logo.png",
+    "48": "assets/img/logo.png",
+    "128": "assets/img/logo.png"
+  },
+  "background": {
+    "service_worker": "background/background.bundle.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": "assets/img/logo.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/content.bundle.js"]
+    }
+  ],
+  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "offscreen",
+    "storage",
+    "webRequest",
+    "activeTab",
+    "webNavigation",
+    "scripting",
+    "tabs"
+  ]
+}

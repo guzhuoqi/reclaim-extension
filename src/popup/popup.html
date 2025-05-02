@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reclaim Extension</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="../logo.png" alt="Reclaim Logo" class="logo">
+      <h1>Reclaim</h1>
+    </div>
+    
+    <div class="content">
+      <div class="status-section">
+        <h2>Schedule Status</h2>
+        <div class="status">
+          <span class="status-indicator active"></span>
+          <p>Extension Active</p>
+        </div>
+      </div>
+      
+      <div class="tasks-section">
+        <h2>Upcoming Tasks</h2>
+        <ul id="tasks-list">
+          <!-- Tasks will be populated by JavaScript -->
+          <li class="task">
+            <div class="task-time">10:00 AM</div>
+            <div class="task-details">
+              <div class="task-title">Team Meeting</div>
+              <div class="task-duration">30 min</div>
+            </div>
+          </li>
+          <li class="task">
+            <div class="task-time">2:00 PM</div>
+            <div class="task-details">
+              <div class="task-title">Project Review</div>
+              <div class="task-duration">45 min</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <button id="settings-btn">Settings</button>
+      <button id="open-reclaim-btn" class="primary">Open Reclaim</button>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
