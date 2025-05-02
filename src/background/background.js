@@ -1,14 +1,16 @@
 // Import necessary utilities and libraries
-import { NetworkFilter } from '../utils/network-filter.js';
-import { API_ENDPOINTS } from '../utils/constants.js';
-import { fetchProviderData } from '../utils/start-verification.js';
+import { filterRequest } from '../utils/network-filter.js';
+import { fetchProviderData, updateSessionStatus } from '../utils/start-verification.js';
+import { RECLAIM_SESSION_STATUS } from '../utils/interfaces.js';
+
 
 class ReclaimExtensionManager {
     constructor() {
-        this.networkFilter = new NetworkFilter();
         this.activeTabId = null;
         this.isNetworkListenerActive = false;
         this.disableNetworkMonitoring();
+        this.providerData = null;
+        this.parameters = null;
 
         // Initialize extension
         this.init();
@@ -65,6 +67,12 @@ class ReclaimExtensionManager {
 
             // fetch provider data
             const providerData = await fetchProviderData(templateData.providerId);
+            this.providerData = providerData;
+            if (templateData.parameters) {
+                this.parameters = templateData.parameters;
+            }
+
+
             console.log('[BACKGROUND] Provider data:', providerData);
 
             if (!providerData) {
@@ -76,6 +84,8 @@ class ReclaimExtensionManager {
             console.log('[BACKGROUND] Provider URL:', providerUrl);
             const tab = await chrome.tabs.create({ url: providerUrl });
             this.activeTabId = tab.id;
+            // update session status to USER_STARTED_VERIFICATION
+            await updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION);
 
             // start network monitoring
             console.log('[BACKGROUND] Starting network monitoring');
@@ -84,44 +94,6 @@ class ReclaimExtensionManager {
             console.error('[BACKGROUND] Error starting verification:', error);
             throw error;
         }
-    }
-
-    async fetchProviderUrl(providerId) {
-        try {
-            const response = await fetch(API_ENDPOINTS.PROVIDER_URL(providerId));
-            if (!response.ok) {
-                throw new Error(`HTTP error ${response.status}: ${await response.text()}`);
-            }
-            const data = await response.json();
-            return data.url;
-        } catch (error) {
-            console.error('Error fetching provider URL:', error);
-            throw error;
-        }
-    }
-
-    async navigateToProvider(url) {
-        // Create a new tab with the provider URL
-        const tab = await chrome.tabs.create({ url });
-        this.activeTabId = tab.id;
-
-        // Configure network filtering for this tab if needed
-        await this.setupNetworkFilteringForTab(tab.id);
-
-        return tab;
-    }
-
-    async setupNetworkFilteringForTab(tabId) {
-        // Get session data to configure proper filtering
-        const sessionData = await this.sessionManager.getCurrentSession();
-
-        if (!sessionData) return;
-
-        // Set up filtering rules based on provider
-        const filterRules = this.networkFilter.getRulesForProvider(sessionData.providerId);
-
-        // Apply rules to the network filter
-        this.networkFilter.setRules(filterRules);
     }
 
     async injectCustomScript(tabId, scriptContent) {
@@ -182,13 +154,44 @@ class ReclaimExtensionManager {
     }
 
     async handleNetworkRequest(details) {
-        // Process the request details in real-time (avoid storing)
-        // log network request details
-        console.log('[BACKGROUND] Network request:', details);
-        const matchResult = this.networkFilter.matchRequest(details);
+        try {
+            // Skip if provider data is not loaded yet
+            if (!this.providerData || !this.providerData.requestData) {
+                return;
+            }
 
-        if (matchResult.isMatch) {
-            console.log('Matching request found:', matchResult.pattern);
+            // Format the request object to match what filterRequest expects
+            const formattedRequest = {
+                url: details.url,
+                method: details.method || 'GET', // Default to GET if method not provided
+                body: null
+            };
+
+            // Extract and format request body if available
+            if (details.requestBody) {
+                if (details.requestBody.raw) {
+                    // Raw binary data
+                    const encoder = new TextDecoder('utf-8');
+                    try {
+                        const rawData = details.requestBody.raw[0].bytes;
+                        formattedRequest.body = encoder.decode(rawData);
+                    } catch (e) {
+                        console.warn('Could not decode request body', e);
+                    }
+                } else if (details.requestBody.formData) {
+                    // Form data
+                    formattedRequest.body = JSON.stringify(details.requestBody.formData);
+                }
+            }
+
+            // requestData is an array of objects check if any of the objects match the request
+            const matchResult = this.providerData.requestData.some(criteria => filterRequest(formattedRequest, criteria, this.parameters));
+            if (matchResult) {
+                console.log('Matching request found:', formattedRequest);
+            }
+            
+        } catch (error) {
+            console.error('Error handling network request:', error);
         }
     }
 

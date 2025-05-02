@@ -15,3 +15,20 @@ export const fetchProviderData = async (providerId) => {
         throw error;
     }
 }
+
+export const updateSessionStatus = async (sessionId, status) => {
+    try {
+        const response = await fetch(`${API_ENDPOINTS.UPDATE_SESSION_STATUS()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, status })
+          });
+      
+        const res = await response.json();
+        return res;
+    } catch (error) {
+        console.error('Error updating session status:', error);
+        throw error;
+    }
+}
+    
