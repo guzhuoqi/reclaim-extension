@@ -78,6 +78,18 @@ The extension requires the following permissions:
   - `/lib`: Libraries and third-party code
   - `/assets`: Images and other static assets
 
+### Polyfills for Node.js Modules
+
+The extension uses several Node.js polyfills to support libraries like `@reclaimprotocol/attestor-core` in the browser environment. These polyfills are implemented through:
+
+1. **Node Polyfill Webpack Plugin**: Automatically provides polyfills for Node.js core modules
+2. **Custom polyfill file**: Located at `src/utils/polyfills.js`, this handles specific browser-Node.js compatibility issues
+3. **Webpack resolve.fallback**: Configures specific polyfills for Node.js core modules
+
+When adding new Node.js-dependent libraries, you may need to update the polyfill configuration in:
+- webpack.config.js
+- src/utils/polyfills.js
+
 ### Key Components
 
 - **NetworkFilter**: Filters and analyzes network requests to extract verification data

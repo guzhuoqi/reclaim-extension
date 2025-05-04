@@ -1,8 +1,15 @@
+// Import WebSocket fix before anything else
+import '../utils/fix-websocket';
+
+// Import polyfills first
+import '../utils/polyfills';
+
 // Import necessary utilities and libraries
 import { filterRequest } from '../utils/network-filter.js';
 import { fetchProviderData, updateSessionStatus } from '../utils/start-verification.js';
-import { RECLAIM_SESSION_STATUS } from '../utils/interfaces.js';
-
+import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/interfaces.js';
+import { generateProof } from '../utils/proof-generator.js';
+import { testPolyfills } from '../utils/polyfill-test.js';
 
 class ReclaimExtensionManager {
     constructor() {
@@ -17,35 +24,99 @@ class ReclaimExtensionManager {
     }
 
     async init() {
-        // Setup message listeners for communication with content scripts and SDK
-        chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
+        // Test polyfills
+        const polyfillTestResults = testPolyfills();
+        console.log('Polyfill test results:', polyfillTestResults);
 
+        // Register message handler
+        chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
+        
         console.log('Reclaim Extension initialized');
     }
 
     async handleMessage(message, sender, sendResponse) {
-        const { action, data } = message;
+
+        const { action, source, target, data } = message;
+        console.log('[BACKGROUND] Received message from', source, 'to', target, 'with action', action);
 
         try {
             switch (action) {
-                case 'CONTENT_SCRIPT_LOADED':
-                    console.log('[BACKGROUND] Content script loaded', data.url);
-                    sendResponse({ success: true });
+                // Handle content script loaded message
+                case MESSAGER_ACTIONS.CONTENT_SCRIPT_LOADED:
+                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                        console.log('[BACKGROUND] Content script loaded', data.url);
+                        sendResponse({ success: true });
+                        break;
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
                     break;
 
-                case 'START_VERIFICATION':
-                    console.log('[BACKGROUND] Starting verification with data:', data);
-                    // check if the data is valid
-                    const result = await this.startVerification(data);
-                    sendResponse({ success: true, result });
+                // Handle offscreen ready message
+                case MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY:
+                    if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
+                        console.log('[BACKGROUND] Offscreen document ready signal received');
+                        // Always respond with success to acknowledge receipt
+                        sendResponse({ 
+                            success: true, 
+                            source: MESSAGER_TYPES.BACKGROUND,
+                            target: MESSAGER_TYPES.OFFSCREEN
+                        });
+                        return true; // Keep channel open for async response
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    break;
+                
+                // Handle ping from proof-generator to offscreen
+                case 'PING_OFFSCREEN':
+                    if (target === MESSAGER_TYPES.OFFSCREEN) {
+                        // Just relay the message to offscreen, response handled elsewhere
+                        chrome.runtime.sendMessage(message);
+                        sendResponse({ success: true });
+                    }
+                    break;
+
+                // Handle start verification message
+                case MESSAGER_ACTIONS.START_VERIFICATION:
+                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                        console.log('[BACKGROUND] Starting verification with data:', data);
+                        const result = await this.startVerification(data);
+                        sendResponse({ success: true, result });
+                        break;
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    break;
+
+                // Handle generate proof request message
+                case MESSAGER_ACTIONS.GENERATE_PROOF_REQUEST:
+                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                        try {
+                            console.log('[BACKGROUND] Generating proof with data:', data);
+                            // This will communicate with offscreen internally
+                            const proof = await generateProof(data);
+                            sendResponse({ success: true, proof });
+                        } catch (error) {
+                            console.error('[BACKGROUND] Error generating proof:', error);
+                            sendResponse({ success: false, error: error.message });
+                        }
+                        break;
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
                     break;
 
                 default:
-                    console.log('Message received but not processed:', action);
+                    console.log('[BACKGROUND] Message received but not processed:', action);
                     sendResponse({ success: false, error: 'Action not supported' });
             }
         } catch (error) {
-            console.error(`Error handling ${action}:`, error);
+            console.error(`[BACKGROUND] Error handling ${action}:`, error);
             sendResponse({ success: false, error: error.message });
         }
 
@@ -72,24 +143,39 @@ class ReclaimExtensionManager {
                 this.parameters = templateData.parameters;
             }
 
-
             console.log('[BACKGROUND] Provider data:', providerData);
 
             if (!providerData) {
                 throw new Error('Provider data not found');
             }
 
-            // redirect to the provider login page in a new tab and set it as active tab
+            // Create a new tab with provider URL DIRECTLY - not through an async flow
             const providerUrl = providerData.loginUrl;
-            console.log('[BACKGROUND] Provider URL:', providerUrl);
-            const tab = await chrome.tabs.create({ url: providerUrl });
-            this.activeTabId = tab.id;
-            // update session status to USER_STARTED_VERIFICATION
-            await updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION);
-
-            // start network monitoring
-            console.log('[BACKGROUND] Starting network monitoring');
-            this.enableNetworkMonitoring();
+            console.log('[BACKGROUND] Creating new tab with URL:', providerUrl);
+            
+            // Use chrome.tabs.create directly and handle the promise explicitly
+            chrome.tabs.create({ url: providerUrl }, (tab) => {
+                console.log('[BACKGROUND] New tab created with ID:', tab.id);
+                this.activeTabId = tab.id;
+                
+                // Update session status after tab creation
+                updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION)
+                    .then(() => {
+                        console.log('[BACKGROUND] Session status updated');
+                        
+                        // Start network monitoring after tab creation
+                        console.log('[BACKGROUND] Starting network monitoring');
+                        this.enableNetworkMonitoring();
+                    })
+                    .catch(error => {
+                        console.error('[BACKGROUND] Error updating session status:', error);
+                    });
+            });
+            
+            return { 
+                success: true, 
+                message: 'Verification started, redirecting to provider login page'
+            };
         } catch (error) {
             console.error('[BACKGROUND] Error starting verification:', error);
             throw error;
@@ -185,9 +271,19 @@ class ReclaimExtensionManager {
             }
 
             // requestData is an array of objects check if any of the objects match the request
-            const matchResult = this.providerData.requestData.some(criteria => filterRequest(formattedRequest, criteria, this.parameters));
-            if (matchResult) {
+            const matchingCriteria = this.providerData.requestData.find(criteria => 
+                filterRequest(formattedRequest, criteria, this.parameters)
+            );
+            
+            if (matchingCriteria) {
                 console.log('Matching request found:', formattedRequest);
+                // Generate and submit proof when we find a matching request
+                try {
+                    await this.generateAndSubmitProof(formattedRequest, matchingCriteria);
+                } catch (error) {
+                    console.error('Error handling network request:', error);
+                    // Don't throw here to avoid breaking the web request listener
+                }
             }
             
         } catch (error) {
@@ -195,32 +291,84 @@ class ReclaimExtensionManager {
         }
     }
 
-    async submitProof(proof) {
-        // Get current session to determine where to send the proof
-        const session = await this.sessionManager.getCurrentSession();
-
-        // Send proof to backend
+    async generateAndSubmitProof(request, criteria) {
         try {
-            // const response = await fetch(`${.BACKEND_URL}/session/${session.sessionId}/proof`, {
+            console.log('[BACKGROUND] Generating proof for matched request');
+            
+            // Prepare the claim data
+            const claimData = {
+                name: "http",
+                params: {
+                    url: request.url,
+                    method: request.method,
+                    responseMatches: criteria.responseMatches || [],
+                    responseRedactions: criteria.responseRedactions || []
+                },
+                secretParams: {
+                    headers: {}
+                },
+                // You may need to get these values from appropriate sources
+                ownerPrivateKey: "0x1234567456789012345678901234567890123456789012345678901234567890", // This should be securely generated or provided
+                client: {
+                    url: "wss://attestor.reclaimprotocol.org/ws"
+                }
+            };
+            
+            // Call the generateProof utility function - this will handle offscreen communication internally
+            const proof = await generateProof(claimData);
+            console.log('[BACKGROUND] Proof generated:', proof);
+            
+            // Submit the proof
+            await this.submitProof(proof);
+            
+            // Disable network monitoring as we've found what we need
+            this.disableNetworkMonitoring();
+            
+            return proof;
+        } catch (error) {
+            console.error('[BACKGROUND] Error generating or submitting proof:', error);
+            throw error;
+        }
+    }
+
+    async submitProof(proof) {
+        try {
+            console.log('[BACKGROUND] Submitting proof:', proof);
+            
+            // We need the current session data
+            if (!this.providerData) {
+                throw new Error('Provider data not available');
+            }
+            
+            // TODO: Replace with actual backend endpoint when available
+            // const response = await fetch(`https://api.reclaimprotocol.org/session/${sessionId}/proof`, {
             //     method: 'POST',
             //     headers: {
             //         'Content-Type': 'application/json'
             //     },
             //     body: JSON.stringify({ proof })
             // });
-
-            // const result = await response.json();
-            console.log('Proof submitted successfully:');
-
-            // Notify SDK if needed
-            if (session.notifySDK) {
-                chrome.runtime.sendMessage({
-                    action: 'PROOF_SUBMITTED',
-                    data: { sessionId: session.sessionId, proof }
-                });
+            
+            // For development, log that we would submit the proof
+            console.log('[BACKGROUND] Proof would be submitted to backend');
+            
+            // Notify content script
+            if (this.activeTabId) {
+                try {
+                    await chrome.tabs.sendMessage(this.activeTabId, {
+                        action: 'PROOF_SUBMITTED',
+                        data: { proof }
+                    });
+                    console.log('[BACKGROUND] Content script notified of proof submission');
+                } catch (error) {
+                    console.error('[BACKGROUND] Error notifying content script:', error);
+                }
             }
+            
+            return { success: true };
         } catch (error) {
-            console.error('Error submitting proof:', error);
+            console.error('[BACKGROUND] Error submitting proof:', error);
+            throw error;
         }
     }
 }

@@ -8,6 +8,7 @@ var webpack = require("webpack"),
 var { CleanWebpackPlugin } = require("clean-webpack-plugin");
 var ReactRefreshWebpackPlugin = require("@pmmmwh/react-refresh-webpack-plugin");
 var ExtReloader = require('webpack-ext-reloader');
+var NodePolyfillPlugin = require('node-polyfill-webpack-plugin');
 
 const ASSET_PATH = process.env.ASSET_PATH || "/";
 
@@ -44,12 +45,23 @@ var options = {
     /Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0/,
     /Global built-in functions are deprecated and will be removed in Dart Sass 3.0.0./,
     /repetitive deprecation warnings omitted/,
+    // Add these to ignore binary module errors
+    /Critical dependency: the request of a dependency is an expression/,
+    /Module parse failed: Unexpected character/,
+    /Can't resolve 'worker_threads'/,
+    // Ignore native module errors
+    /Can't resolve '\.node'/,
+    // Additional ignores
+    /Can't resolve 'fs'/,
+    /Can't resolve 'child_process'/,
+    /node:url/,
   ],
 
   entry: {
     popup: path.join(__dirname, "src", "popup", "popup.js"),
     "background/background": path.join(__dirname, "src", "background", "background.js"),
     "content/content": path.join(__dirname, "src", "content", "content.js"),
+    "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js"),
   },
   // chromeExtensionBoilerplate: {
   //   notHotReload: ["background", "contentScript", "devtools"],
@@ -131,13 +143,62 @@ var options = {
         ],
         exclude: /node_modules/,
       },
+      // Add WebAssembly support
+      {
+        test: /\.wasm$/,
+        type: 'webassembly/async',
+      }
     ],
   },
+  // Enable WebAssembly
+  experiments: {
+    asyncWebAssembly: true,
+  },
   resolve: {
-    alias: alias,
+    alias: {
+      ...alias,
+      // Add aliases for problematic modules
+      'koffi': false,
+      're2': false,
+      'worker_threads': path.resolve(__dirname, 'src/utils/mocks/worker-threads-mock.js'),
+      'snarkjs': false,
+      'node:url': require.resolve('url/'),
+      'react-native-tcp-socket': false,
+      // Use process/browser.js instead of process/browser
+      'process/browser': require.resolve('process/browser.js'),
+      // Mock canvas for jsdom
+      'canvas': false,
+      // Use our JSDOM mock
+      'jsdom': path.resolve(__dirname, 'src/utils/mocks/jsdom-mock.js'),
+      // Add WebSocket polyfill
+      'ws': path.resolve(__dirname, 'src/utils/websocket-polyfill.js'),
+    },
     extensions: fileExtensions
       .map((extension) => "." + extension)
       .concat([".js", ".jsx", ".ts", ".tsx", ".css"]),
+    fallback: {
+      "stream": require.resolve("stream-browserify"),
+      "buffer": require.resolve("buffer/"),
+      "crypto": require.resolve("crypto-browserify"),
+      "https": require.resolve("https-browserify"),
+      "http": require.resolve("stream-http"),
+      "path": require.resolve("path-browserify"),
+      "zlib": require.resolve("browserify-zlib"),
+      "assert": require.resolve("assert/"),
+      "url": require.resolve("url/"),
+      "util": require.resolve("util/"),
+      "os": require.resolve("os-browserify/browser"),
+      "vm": require.resolve("vm-browserify"),
+      "constants": require.resolve("constants-browserify"),
+      "fs": false,
+      "net": false,
+      "tls": false,
+      "child_process": false,
+      "worker_threads": false,
+      "readline": false,
+      "koffi": false,
+      're2': false,
+    }
   },
   plugins: [
     isDevelopment && new ReactRefreshWebpackPlugin(),
@@ -145,6 +206,17 @@ var options = {
     new webpack.ProgressPlugin(),
     // expose and write the allowed env vars on the compiled bundle
     new webpack.EnvironmentPlugin(["NODE_ENV"]),
+    // Add NodePolyfillPlugin to handle Node.js polyfills
+    new NodePolyfillPlugin(),
+    // Provide global Buffer and process
+    new webpack.ProvidePlugin({
+      Buffer: ['buffer', 'Buffer'],
+      process: 'process/browser.js',
+    }),
+    // Ignore specific Node.js specific modules
+    new webpack.IgnorePlugin({
+      resourceRegExp: /^node:url$/
+    }),
     // new ExtReloader({
     //   manifest: path.resolve(__dirname, "src/manifest.json")
     // }),
@@ -173,6 +245,11 @@ var options = {
         {
           from: "src/popup/popup.css",
           to: path.join(__dirname, "build", "popup"),
+          force: true,
+        },
+        {
+          from: "src/offscreen/offscreen.html",
+          to: path.join(__dirname, "build", "offscreen"),
           force: true,
         },
         {

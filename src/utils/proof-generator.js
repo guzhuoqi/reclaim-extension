@@ -1,94 +1,220 @@
-// utils/proof-generator.js
+// Import WebSocket fix before anything else
+import './fix-websocket';
 
-import * as snarkjs from 'snarkjs';
+// Import polyfills before attestor-core
+import './polyfills';
+import { MESSAGER_ACTIONS, MESSAGER_TYPES } from './interfaces.js';
 
-export class ProofGenerator {
-  constructor() {
-    this.wasmFile = null;
-    this.zkeyFile = null;
-    
-    // Load necessary circuit files
-    this.loadCircuits();
-  }
-  
-  async loadCircuits() {
-    try {
-      // Load the WebAssembly and zkey files for the circuits
-      // These would typically be fetched from your server or included in the extension package
-      const wasmResponse = await fetch(chrome.runtime.getURL('lib/circuits/circuit.wasm'));
-      const zkeyResponse = await fetch(chrome.runtime.getURL('lib/circuits/circuit.zkey'));
-      
-      this.wasmFile = await wasmResponse.arrayBuffer();
-      this.zkeyFile = await zkeyResponse.arrayBuffer();
-      
-      console.log('Circuit files loaded successfully');
-    } catch (error) {
-      console.error('Error loading circuit files:', error);
+// Track the offscreen document status
+let offscreenReady = false;
+let offscreenDocTimeout = null;
+
+// Global listener for the ready signal from offscreen document
+// We need to set this up immediately to catch the ready signal
+const setupOffscreenReadyListener = () => {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY && 
+        message.source === MESSAGER_TYPES.OFFSCREEN && 
+        message.target === MESSAGER_TYPES.BACKGROUND) {
+      console.log('[PROOF-GENERATOR] Received offscreen ready signal');
+      offscreenReady = true;
+      if (offscreenDocTimeout) {
+        clearTimeout(offscreenDocTimeout);
+        offscreenDocTimeout = null;
+      }
     }
-  }
-  
-  async generateProof(requestData) {
-    try {
-      if (!this.wasmFile || !this.zkeyFile) {
-        await this.loadCircuits();
+  });
+};
+
+// Set up listener immediately
+setupOffscreenReadyListener();
+
+export const generateProof = async (claimData) => {
+  try {
+    console.log('[PROOF-GENERATOR] Starting proof generation with data:', claimData);
+    
+    // Reset ready flag when starting
+    offscreenReady = false;
+    
+    // Check if offscreen document exists, create if not
+    const exists = await checkOffscreenExists();
+    if (exists) {
+      console.log('[PROOF-GENERATOR] Offscreen document already exists');
+      // If it exists, attempt to close it first
+      try {
+        await chrome.offscreen.closeDocument();
+        console.log('[PROOF-GENERATOR] Closed existing offscreen document');
+      } catch (e) {
+        console.log('[PROOF-GENERATOR] No document to close or error closing:', e);
+      }
+    }
+    
+    // Always create a fresh document to ensure proper initialization
+    await createOffscreenDocument();
+      
+    // Wait for the offscreen document to be ready
+    const isReady = await waitForOffscreenReady();
+    if (!isReady) {
+      // Try one more time with a fresh document before giving up
+      console.log('[PROOF-GENERATOR] First attempt timed out, trying once more with a fresh document');
+      try {
+        await chrome.offscreen.closeDocument();
+      } catch (e) {
+        console.log('[PROOF-GENERATOR] Error closing document on retry:', e);
       }
       
-      // Prepare the input for the circuit
-      const input = this.prepareInput(requestData);
+      await createOffscreenDocument();
+      const retryReady = await waitForOffscreenReady(20000); // Longer timeout on retry
       
-      // Generate the proof using snarkjs
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-        input, 
-        this.wasmFile,
-        this.zkeyFile
-      );
-      
-      // Format the proof for verification
-      const formattedProof = this.formatProof(proof, publicSignals, requestData);
-      
-      return formattedProof;
-    } catch (error) {
-      console.error('Error generating ZK proof:', error);
-      throw error;
+      if (!retryReady) {
+        throw new Error('Failed to initialize offscreen document');
+      }
     }
+    
+    // Use the offscreen document to generate the proof
+    return new Promise((resolve, reject) => {
+      console.log('[PROOF-GENERATOR] Sending proof generation request to offscreen document');
+      
+      // Use provided claim data or fallback to default
+      const message = {
+        action: MESSAGER_ACTIONS.GENERATE_PROOF,
+        source: MESSAGER_TYPES.BACKGROUND,
+        target: MESSAGER_TYPES.OFFSCREEN,
+        data: {
+          "name": "http",
+          "params": {
+            "url": "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+            "method": "GET",
+            "responseMatches": [
+              {
+                "type": "regex",
+                "value": "{\"ethereum\":{\"usd\":(?<price>[\\d\\.]+)}}"
+              }
+            ],
+            "responseRedactions": []
+          },
+          "secretParams": {
+            "headers": {
+              "accept": "application/json, text/plain, */*"
+            }
+          },
+          "ownerPrivateKey": "0x1234567456789012345678901234567890123456789012345678901234567890",
+          "client": {
+            "url": "wss://attestor.reclaimprotocol.org/ws"
+          }
+        }
+      };
+      
+      // Direct message to offscreen document with timeout for response
+      const messageTimeout = setTimeout(() => {
+        console.error('[PROOF-GENERATOR] Timeout waiting for proof generation response');
+        reject(new Error('Timeout generating proof'));
+      }, 30000); // 30 second timeout for proof generation
+      
+      chrome.runtime.sendMessage(message, (response) => {
+        clearTimeout(messageTimeout);
+        
+        if (chrome.runtime.lastError) {
+          console.error('[PROOF-GENERATOR] Error sending message to offscreen:', chrome.runtime.lastError);
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        
+        if (response && response.success) {
+          console.log('[PROOF-GENERATOR] Proof generated successfully');
+          resolve(response.proof);
+        } else if (response) {
+          console.error('[PROOF-GENERATOR] Error generating proof:', response.error);
+          reject(new Error(response.error));
+        } else {
+          reject(new Error('No response from offscreen document'));
+        }
+      });
+    });
+  } catch (error) { 
+    console.error('[PROOF-GENERATOR] Error in proof generation process:', error);
+    throw error;
+  }
+}
+
+// Function to wait for offscreen document to be ready
+async function waitForOffscreenReady(timeoutMs = 15000) {
+  if (offscreenReady) return true;
+  
+  console.log('[PROOF-GENERATOR] Waiting for offscreen document to be ready...');
+  
+  // Proactively ping the offscreen document to check if it's responsive
+  try {
+    chrome.runtime.sendMessage({
+      action: 'PING_OFFSCREEN',
+      source: MESSAGER_TYPES.BACKGROUND,
+      target: MESSAGER_TYPES.OFFSCREEN
+    });
+  } catch (e) {
+    console.log('[PROOF-GENERATOR] Ping attempt failed:', e);
   }
   
-  prepareInput(requestData) {
-    // Extract and format the necessary fields from requestData
-    // The exact structure depends on your circuit's expected input format
-    const input = {
-      data: [],
-      timestamp: Math.floor(requestData.timestamp / 1000)
+  return new Promise((resolve) => {
+    // Set up a listener for the ready message
+    const readyListener = (message) => {
+      if (message.action === MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY && 
+          message.source === MESSAGER_TYPES.OFFSCREEN && 
+          message.target === MESSAGER_TYPES.BACKGROUND) {
+        offscreenReady = true;
+        chrome.runtime.onMessage.removeListener(readyListener);
+        console.log('[PROOF-GENERATOR] Offscreen document is ready');
+        if (offscreenDocTimeout) {
+          clearTimeout(offscreenDocTimeout);
+          offscreenDocTimeout = null;
+        }
+        resolve(true);
+      }
     };
     
-    // Convert extracted fields to the format expected by the circuit
-    for (const [key, value] of Object.entries(requestData.extractedFields)) {
-      if (typeof value === 'string') {
-        // Convert string to array of field elements (depends on circuit)
-        const bytes = new TextEncoder().encode(value);
-        input.data.push(Array.from(bytes));
-      } else if (typeof value === 'number') {
-        input.data.push(value);
-      }
-    }
+    // Add the listener
+    chrome.runtime.onMessage.addListener(readyListener);
     
-    return input;
+    // Set a timeout to prevent infinite waiting
+    offscreenDocTimeout = setTimeout(() => {
+      chrome.runtime.onMessage.removeListener(readyListener);
+      console.error('[PROOF-GENERATOR] Timed out waiting for offscreen document to be ready');
+      resolve(false);
+    }, timeoutMs);
+  });
+}
+
+async function checkOffscreenExists() {
+  // Check if offscreen document is already open
+  try {
+    const existingContexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT']
+    });
+    return existingContexts.length > 0;
+  } catch (e) {
+    // Try alternative method for Chrome versions that don't support getContexts
+    console.log('[PROOF-GENERATOR] getContexts not supported, using alternative check');
+    try {
+      // If we can close the document, it must exist
+      await chrome.offscreen.closeDocument();
+      return true;
+    } catch (closeError) {
+      // If we get an error closing, it probably doesn't exist
+      return false;
+    }
   }
-  
-  formatProof(proof, publicSignals, requestData) {
-    // Format the proof to match the structure expected by the Reclaim SDK
-    return {
-      proof: {
-        a: proof.a,
-        b: proof.b,
-        c: proof.c
-      },
-      publicSignals,
-      metadata: {
-        source: requestData.url,
-        timestamp: requestData.timestamp,
-        fields: requestData.extractedFields
-      }
-    };
+}
+
+async function createOffscreenDocument() {
+  // Create an offscreen document
+  try {
+    await chrome.offscreen.createDocument({
+      url: chrome.runtime.getURL('offscreen/offscreen.html'),
+      reasons: ['DOM_PARSER', 'IFRAME_SCRIPTING'],
+      justification: 'Used for ZK proof generation'
+    });
+    console.log('[PROOF-GENERATOR] Offscreen document created successfully');
+  } catch (error) {
+    console.error('[PROOF-GENERATOR] Error creating offscreen document:', error);
+    throw error;
   }
 }

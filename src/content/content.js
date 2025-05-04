@@ -1,5 +1,11 @@
+// Import WebSocket fix before anything else
+import '../utils/fix-websocket';
+
+// Import polyfills first
+import '../utils/polyfills';
+
 // This script runs in the context of the web page
-import { RECLAIM_SDK_ACTIONS } from '../utils/interfaces.js';
+import { RECLAIM_SDK_ACTIONS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/interfaces.js';
 
 class ReclaimContentScript {
     constructor() {
@@ -12,7 +18,9 @@ class ReclaimContentScript {
       
       // Notify background script that content script is loaded
       chrome.runtime.sendMessage({ 
-        action: 'CONTENT_SCRIPT_LOADED', 
+        action: MESSAGER_ACTIONS.CONTENT_SCRIPT_LOADED, 
+        source: MESSAGER_TYPES.CONTENT_SCRIPT,
+        target: MESSAGER_TYPES.BACKGROUND,
         data: { url: window.location.href } 
       });
 
@@ -32,6 +40,16 @@ class ReclaimContentScript {
         case 'EXTRACT_DOM_DATA':
           const domData = this.extractDOMData(data.selectors);
           sendResponse({ success: true, data: domData });
+          break;
+          
+        case 'PROOF_SUBMITTED':
+          // Forward proof to the page
+          console.log('[CONTENT] Proof submitted, notifying page:', data);
+          window.postMessage({
+            action: RECLAIM_SDK_ACTIONS.VERIFICATION_COMPLETED,
+            data: data.proof
+          }, '*');
+          sendResponse({ success: true });
           break;
           
         default:
@@ -61,7 +79,9 @@ class ReclaimContentScript {
       if (action === RECLAIM_SDK_ACTIONS.START_VERIFICATION && data) {
         // Forward the template data to background script
         chrome.runtime.sendMessage({
-          action: 'START_VERIFICATION',
+          action: MESSAGER_ACTIONS.START_VERIFICATION,
+          source: MESSAGER_TYPES.CONTENT_SCRIPT,
+          target: MESSAGER_TYPES.BACKGROUND,
           data: data
         }, (response) => {
             console.log('[CONTENT] Starting verification with data:', data);

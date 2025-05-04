@@ -1,3 +1,6 @@
+// Import polyfills first
+import '../utils/polyfills';
+
 document.addEventListener('DOMContentLoaded', () => {
   // Sample data - in a real extension, this would come from APIs or storage
   const upcomingTasks = [
