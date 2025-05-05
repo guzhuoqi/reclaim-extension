@@ -2,6 +2,7 @@
 import './polyfills';
 
 import { MESSAGER_ACTIONS, MESSAGER_TYPES } from './interfaces.js';
+import { createClaimOnAttestor } from '@reclaimprotocol/attestor-core';
 
 // Track the offscreen document status
 let offscreenReady = false;
@@ -27,70 +28,94 @@ const setupOffscreenReadyListener = () => {
 // Set up listener immediately
 setupOffscreenReadyListener();
 
-// Simple mock implementation of proof generation
+// Main function to generate proof using offscreen document
 export const generateProof = async (claimData) => {
   try {
-    console.log('[PROOF-GENERATOR] Starting proof generation with data:', claimData)
+    console.log('[PROOF-GENERATOR] Starting proof generation with data:', claimData);
     
-    // Find active tab to use for proof generation
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab) {
-      throw new Error('No active tab found for proof generation');
-    }
+    // Ensure the offscreen document exists and is ready
+    await ensureOffscreenDocument();
     
-    console.log('[PROOF-GENERATOR] Using active tab for proof generation:', activeTab.id);
-    
-    // Use the content script to generate the proof
-    return new Promise((resolve, reject) => {
-      console.log('[PROOF-GENERATOR] Sending proof generation request to content script');
-      
-      // Ensure the data is properly stringified and re-parsed to avoid encoding issues
-      let cleanData;
-      if (claimData) {
-        try {
-          // Clean the data by stringifying and parsing it
-          cleanData = JSON.parse(JSON.stringify(claimData));
-        } catch (e) {
-          console.warn('[PROOF-GENERATOR] Error cleaning data:', e);
-          // Fall back to the original data
-          cleanData = claimData;
-        }
-      } else {
-        // Default test data
-        
+    // Clean the data to avoid encoding issues
+    let cleanData = {
+      "name": "http",
+      "description": [
+          "Example to fetch the current price of ETH in USD",
+          "from the CoinGecko API",
+          "The current price will be extracted & stored in",
+          "context.extractedParams.price"
+      ],
+      "params": {
+          "method": "GET",
+          "url": "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+          "responseMatches": [
+              {
+                  "type": "regex",
+                  "value": "\\{\"ethereum\":\\{\"usd\":(?<price>[\\d\\.]+)\\}\\}"
+              }
+          ],
+          "responseRedactions": []
+      },
+      "secretParams": {
+          "headers": {
+              "accept": "application/json, text/plain, */*"
+          }
       }
+  }
+    // let cleanData;
+    // if (claimData) {
+    //   try {
+    //     cleanData = JSON.parse(JSON.stringify(claimData));
+    //   } catch (e) {
+    //     console.warn('[PROOF-GENERATOR] Error cleaning data:', e);
+    //     cleanData = claimData;
+    //   }
+    // } else {
+    //   throw new Error('No claim data provided for proof generation');
+    // }
+    
+    // Generate the proof using the offscreen document
+    return new Promise((resolve, reject) => {
+      const messageTimeout = setTimeout(() => {
+        console.error('[PROOF-GENERATOR] Timeout waiting for offscreen document to generate proof');
+        reject(new Error('Timeout generating proof in offscreen document'));
+      }, 30000); // 30 second timeout
       
-      const message = {
-        action: MESSAGER_ACTIONS.GENERATE_PROOF,
-        source: MESSAGER_TYPES.BACKGROUND,
-        target: MESSAGER_TYPES.CONTENT_SCRIPT,
-        data: cleanData
+      // Create a message listener for the offscreen response
+      const messageListener = (response) => {
+        if (response.action === MESSAGER_ACTIONS.GENERATE_PROOF_RESPONSE && 
+            response.source === MESSAGER_TYPES.OFFSCREEN &&
+            response.target === MESSAGER_TYPES.BACKGROUND) {
+          
+          // Clear timeout and remove listener
+          clearTimeout(messageTimeout);
+          chrome.runtime.onMessage.removeListener(messageListener);
+          
+          if (response.success) {
+            console.log('[PROOF-GENERATOR] Proof generated successfully in offscreen document');
+            resolve(response.proof);
+          } else {
+            console.error('[PROOF-GENERATOR] Error generating proof in offscreen document:', response.error);
+            reject(new Error(response.error || 'Unknown error in proof generation'));
+          }
+        }
       };
       
-      // Set timeout for response
-      const messageTimeout = setTimeout(() => {
-        console.error('[PROOF-GENERATOR] Timeout waiting for proof generation response');
-        reject(new Error('Timeout generating proof'));
-      }, 30000); // 30 second timeout for proof generation
+      // Add listener for response
+      chrome.runtime.onMessage.addListener(messageListener);
       
-      // Send message to content script
-      chrome.tabs.sendMessage(activeTab.id, message, (response) => {
-        clearTimeout(messageTimeout);
-        
+      // Send message to offscreen document to generate proof
+      chrome.runtime.sendMessage({
+        action: MESSAGER_ACTIONS.GENERATE_PROOF,
+        source: MESSAGER_TYPES.BACKGROUND,
+        target: MESSAGER_TYPES.OFFSCREEN,
+        data: cleanData
+      }, (sendResponse) => {
         if (chrome.runtime.lastError) {
-          console.error('[PROOF-GENERATOR] Error sending message to content script:', chrome.runtime.lastError);
+          clearTimeout(messageTimeout);
+          chrome.runtime.onMessage.removeListener(messageListener);
+          console.error('[PROOF-GENERATOR] Error sending message to offscreen document:', chrome.runtime.lastError);
           reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        
-        if (response && response.success) {
-          console.log('[PROOF-GENERATOR] Proof generated successfully');
-          resolve(response.proof);
-        } else if (response) {
-          console.error('[PROOF-GENERATOR] Error generating proof:', response.error);
-          reject(new Error(response.error));
-        } else {
-          reject(new Error('No response from content script'));
         }
       });
     });
@@ -98,6 +123,24 @@ export const generateProof = async (claimData) => {
     console.error('[PROOF-GENERATOR] Error in proof generation process:', error);
     throw error;
   }
+};
+
+// Function to ensure the offscreen document exists and is ready
+async function ensureOffscreenDocument() {
+  const exists = await checkOffscreenExists();
+  
+  if (!exists) {
+    console.log('[PROOF-GENERATOR] Offscreen document does not exist, creating it');
+    await createOffscreenDocument();
+  }
+  
+  // Wait for the offscreen document to be ready
+  const isReady = await waitForOffscreenReady();
+  if (!isReady) {
+    throw new Error('Failed to initialize offscreen document for proof generation');
+  }
+  
+  return true;
 }
 
 // Function to wait for offscreen document to be ready
@@ -170,8 +213,12 @@ async function checkOffscreenExists() {
 async function createOffscreenDocument() {
   // Create an offscreen document
   try {
+    // Get the extension URL for the offscreen document
+    const offscreenUrl = chrome.runtime.getURL('offscreen/offscreen.html');
+    console.log('[PROOF-GENERATOR] Creating offscreen document with URL:', offscreenUrl);
+    
     await chrome.offscreen.createDocument({
-      url: chrome.runtime.getURL('offscreen/offscreen.html'),
+      url: offscreenUrl,
       reasons: ['DOM_PARSER', 'IFRAME_SCRIPTING'],
       justification: 'Used for ZK proof generation'
     });

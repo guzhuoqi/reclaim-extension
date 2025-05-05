@@ -32,6 +32,13 @@
     "activeTab",
     "webNavigation",
     "scripting",
-    "tabs"
+    "tabs",
+    "offscreen"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["offscreen/offscreen.html", "offscreen/offscreen.bundle.js"],
+      "matches": ["<all_urls>"]
+    }
   ]
 }

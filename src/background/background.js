@@ -109,6 +109,30 @@ class ReclaimExtensionManager {
                     }
                     break;
 
+                // Handle offscreen document ready message
+                case MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY:
+                    if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
+                        console.log('[BACKGROUND] Offscreen document is ready');
+                        sendResponse({ success: true });
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    break;
+
+                // Handle generate proof response from offscreen document
+                case MESSAGER_ACTIONS.GENERATE_PROOF_RESPONSE:
+                    if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
+                        console.log('[BACKGROUND] Received proof generation response from offscreen document');
+                        // This message is handled by the proof-generator.js using the messageListener
+                        // Just acknowledge receipt here
+                        sendResponse({ success: true });
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    break;
+
                 default:
                     console.log('[BACKGROUND] Message received but not processed:', action);
                     sendResponse({ success: false, error: 'Action not supported' });
@@ -291,21 +315,28 @@ class ReclaimExtensionManager {
 
     async generateAndSubmitProof(request, criteria) {
         try {
-            // TODO: Generate proof
-            const proof = {
-                claimId: 'mock-claim-123',
-                ownerPublicKey: '0x123456789abcdef',
-                epoch: Math.floor(Date.now() / 1000),
-                timestampS: Math.floor(Date.now() / 1000),
-                identifier: criteria.name || 'mock-identifier',
+            // Use the proof-generator utility which leverages offscreen document
+            console.log('[BACKGROUND] Generating proof for request:', request);
+            
+            // Prepare claim data
+            const claimData = {
                 provider: criteria.name || 'http',
-                parameters: criteria.params || {},
-                signatures: [],
-                mockData: true
+                name: criteria.name || 'http',
+                params: criteria.params || {},
+                contextId: crypto.randomUUID(), // Generate a unique context ID
+                request: request // Include the request data for proof generation
             };
+            
+            // Generate proof using offscreen document
+            const proof = await generateProof(claimData);
+            
+            console.log('[BACKGROUND] Proof generated successfully:', proof);
             
             // Disable network monitoring as we've found what we need
             this.disableNetworkMonitoring();
+            
+            // Submit the proof
+            await this.submitProof(proof);
             
             return proof;
         } catch (error) {

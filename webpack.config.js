@@ -61,8 +61,8 @@ var options = {
     popup: path.join(__dirname, "src", "popup", "popup.js"),
     "background/background": path.join(__dirname, "src", "background", "background.js"),
     "content/content": path.join(__dirname, "src", "content", "content.js"),
+    "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js")
   },
-  // Remove external handling for attestor-core as we no longer need it
   output: {
     filename: "[name].bundle.js",
     path: path.resolve(__dirname, "build"),
@@ -102,10 +102,6 @@ var options = {
         test: new RegExp(".(" + fileExtensions.join("|") + ")$"),
         type: "asset/resource",
         exclude: /node_modules/,
-        // loader: 'file-loader',
-        // options: {
-        //   name: '[name].[ext]',
-        // },
       },
       {
         test: /\.html$/,
@@ -172,7 +168,7 @@ var options = {
       'canvas': false,
       // Use our JSDOM mock
       'jsdom': path.resolve(__dirname, 'src/utils/mocks/jsdom-mock.js'),
-      // Add WebSocket polyfill
+      // Add WebSocket polyfill for background context
       'ws': path.resolve(__dirname, 'src/utils/websocket-polyfill.js'),
     },
     extensions: fileExtensions
@@ -215,14 +211,10 @@ var options = {
       Buffer: ['buffer', 'Buffer'],
       process: 'process/browser.js',
     }),
-    // Remove the NormalModuleReplacementPlugin for attestor-core since we're handling it differently
     // Ignore specific Node.js specific modules
     new webpack.IgnorePlugin({
       resourceRegExp: /^node:url$/
     }),
-    // new ExtReloader({
-    //   manifest: path.resolve(__dirname, "src/manifest.json")
-    // }),
     new CopyWebpackPlugin({
       patterns: [
         {
@@ -255,8 +247,17 @@ var options = {
           from: "src/assets/img/logo.png",
           to: path.join(__dirname, "build", "assets", "img"),
           force: true,
-        },
+        }
       ],
+    }),
+    // Use HtmlWebpackPlugin for the offscreen document to ensure proper bundling
+    new HtmlWebpackPlugin({
+      template: path.join(__dirname, "src", "offscreen", "offscreen.html"),
+      filename: "offscreen/offscreen.html",
+      chunks: ["offscreen/offscreen"],
+      inject: true,
+      cache: false,
+      minify: false
     }),
   ].filter(Boolean),
   infrastructureLogging: {
