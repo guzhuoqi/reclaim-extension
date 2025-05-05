@@ -61,16 +61,14 @@ var options = {
     popup: path.join(__dirname, "src", "popup", "popup.js"),
     "background/background": path.join(__dirname, "src", "background", "background.js"),
     "content/content": path.join(__dirname, "src", "content", "content.js"),
-    "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js"),
   },
-  // chromeExtensionBoilerplate: {
-  //   notHotReload: ["background", "contentScript", "devtools"],
-  // },
+  // Remove external handling for attestor-core as we no longer need it
   output: {
     filename: "[name].bundle.js",
     path: path.resolve(__dirname, "build"),
     clean: true,
     publicPath: ASSET_PATH,
+    assetModuleFilename: '[name][ext]',
   },
   module: {
     rules: [
@@ -147,6 +145,10 @@ var options = {
       {
         test: /\.wasm$/,
         type: 'webassembly/async',
+        // Add this to improve compatibility
+        generator: {
+          filename: 'wasm/[name][ext]'
+        },
       }
     ],
   },
@@ -213,6 +215,7 @@ var options = {
       Buffer: ['buffer', 'Buffer'],
       process: 'process/browser.js',
     }),
+    // Remove the NormalModuleReplacementPlugin for attestor-core since we're handling it differently
     // Ignore specific Node.js specific modules
     new webpack.IgnorePlugin({
       resourceRegExp: /^node:url$/
@@ -237,6 +240,7 @@ var options = {
             );
           },
         },
+        // Add binary file handling
         {
           from: "src/popup/popup.html",
           to: path.join(__dirname, "build", "popup"),
@@ -245,11 +249,6 @@ var options = {
         {
           from: "src/popup/popup.css",
           to: path.join(__dirname, "build", "popup"),
-          force: true,
-        },
-        {
-          from: "src/offscreen/offscreen.html",
-          to: path.join(__dirname, "build", "offscreen"),
           force: true,
         },
         {

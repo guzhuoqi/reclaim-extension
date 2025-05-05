@@ -1,38 +1,118 @@
-// WebSocket polyfill for attestor-core
-// This file fixes the "ws.WebSocket is not a constructor" error
+/**
+ * WebSocket Polyfill
+ * 
+ * This module provides a WebSocket polyfill that uses the browser's native WebSocket when available
+ * or provides a mock implementation for background scripts where window is not available.
+ * It ensures compatibility with Node.js-style WebSocket usage patterns.
+ */
 
-// The browser's WebSocket class
-class BrowserWebSocket extends (typeof window !== 'undefined' ? window.WebSocket : class {}) {
-  constructor(url, options) {
-    if (typeof window === 'undefined' || typeof window.WebSocket === 'undefined') {
-      throw new Error('WebSocket is not available in this environment');
-    }
-    super(url);
-    this.url = url;
-    this.options = options;
-  }
-}
+// Check if we're in a context with window (browser/content script) or not (background script)
+const isBackgroundContext = typeof window === 'undefined';
 
-// Export a module that looks like the 'ws' package
-const wsPolyfill = {
-  WebSocket: BrowserWebSocket
-};
+// Create either a real WebSocket wrapper or a mock implementation
+let WebSocketPolyfill;
 
-// Make it globally available to handle dynamic requires
-if (typeof window !== 'undefined') {
-  window.ws = wsPolyfill;
+if (!isBackgroundContext) {
+  // Browser context - use the native WebSocket
+  const BrowserWebSocket = window.WebSocket;
   
-  // Patch global require if it exists
-  if (typeof window.require === 'function') {
-    const originalRequire = window.require;
-    window.require = function(name) {
-      if (name === 'ws') {
-        return wsPolyfill;
-      }
-      return originalRequire(name);
-    };
-  }
+  WebSocketPolyfill = class extends BrowserWebSocket {
+    constructor(url, protocols) {
+      console.log('[WEBSOCKET-POLYFILL] Creating WebSocket with URL:', url);
+      super(url, protocols);
+      
+      // Add event handling compatibility
+      this.addEventListener('error', (event) => {
+        if (typeof this.onerror === 'function') {
+          this.onerror(event);
+        }
+      });
+      
+      this.addEventListener('open', (event) => {
+        if (typeof this.onopen === 'function') {
+          this.onopen(event);
+        }
+      });
+      
+      this.addEventListener('close', (event) => {
+        if (typeof this.onclose === 'function') {
+          this.onclose(event);
+        }
+      });
+      
+      this.addEventListener('message', (event) => {
+        if (typeof this.onmessage === 'function') {
+          this.onmessage(event);
+        }
+      });
+    }
+    
+    // Add a promise-based send method expected by some libraries
+    sendPromise(data) {
+      return new Promise((resolve, reject) => {
+        try {
+          this.send(data);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+  };
+  
+  console.log('[WEBSOCKET-POLYFILL] Using browser WebSocket implementation');
+} else {
+  // Background script context - create a mock implementation
+  WebSocketPolyfill = class {
+    constructor(url, protocols) {
+      console.log('[WEBSOCKET-POLYFILL] Creating mock WebSocket for background context');
+      this.url = url;
+      this.protocols = protocols;
+      this.readyState = 3; // CLOSED
+      
+      // Simulate being closed immediately
+      setTimeout(() => {
+        if (typeof this.onclose === 'function') {
+          this.onclose({ code: 1000, reason: 'WebSockets not supported in background context' });
+        }
+      }, 0);
+    }
+    
+    // No-op methods
+    send() {
+      console.warn('[WEBSOCKET-POLYFILL] Cannot use WebSockets in background context');
+      throw new Error('WebSockets are not available in background context');
+    }
+    
+    close() {
+      // Already closed, no-op
+    }
+    
+    sendPromise() {
+      return Promise.reject(new Error('WebSockets are not available in background context'));
+    }
+    
+    addEventListener() {
+      // No-op
+    }
+    
+    removeEventListener() {
+      // No-op
+    }
+  };
+  
+  console.log('[WEBSOCKET-POLYFILL] Using mock WebSocket implementation for background context');
 }
 
-// This export is used by webpack's ProvidePlugin
-export default wsPolyfill; 
+// Export the WebSocket class and constructor
+export const WebSocket = WebSocketPolyfill;
+export default WebSocketPolyfill;
+
+// For CommonJS compatibility
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = WebSocketPolyfill;
+  module.exports.WebSocket = WebSocketPolyfill;
+  module.exports.default = WebSocketPolyfill;
+}
+
+console.log('[WEBSOCKET-POLYFILL] WebSocket polyfill initialized'); 

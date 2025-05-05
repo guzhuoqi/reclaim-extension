@@ -1,7 +1,7 @@
 // Polyfills for browser and service worker environments
 import { Buffer } from 'buffer';
 import process from 'process';
-import './websocket-polyfill'; // Import the WebSocket polyfill
+import { WebSocket } from './websocket-polyfill';
 
 // Define a safe global object that works across environments
 const getGlobalObject = () => {
@@ -21,42 +21,58 @@ const isServiceWorker = typeof window === 'undefined';
 global.Buffer = global.Buffer || Buffer;
 global.process = global.process || process;
 
-// Ensure ws is properly polyfilled
-if (!isServiceWorker && typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined') {
-  if (!global.ws) {
-    global.ws = {
-      WebSocket: window.WebSocket
-    };
-  }
-} else if (isServiceWorker && !global.ws) {
-  // Create a mock WebSocket for service worker context if not already provided
-  class MockWebSocket {
-    constructor(url) {
-      this.url = url;
-      this.readyState = 0;
-      console.log('Using mock WebSocket in service worker');
-      setTimeout(() => {
-        this.readyState = 1;
-        if (typeof this.onopen === 'function') {
-          this.onopen({ target: this });
-        }
-      }, 10);
+// Make WebSocket polyfill available globally if native one is not available
+if (typeof global.WebSocket === 'undefined') {
+  global.WebSocket = WebSocket;
+  console.log('[POLYFILLS] Added WebSocket polyfill to global');
+} else {
+  console.log('[POLYFILLS] Using native WebSocket implementation');
+}
+
+// Force browser mode for Node.js compatibility
+if (global.process) {
+  global.process.browser = true;
+}
+
+// Handle Node.js-style require for libraries expecting WebSocket
+if (typeof global.require !== 'function') {
+  global.require = (moduleName) => {
+    // Return mock implementations for common modules
+    switch (moduleName) {
+      case 'ws':
+        return { WebSocket }; // Return our polyfill for ws
+      case 'fs':
+        return global.fs;
+      case 'path':
+        return global.path;
+      case 'os':
+        return global.os;
+      case 'crypto':
+        return global.crypto;
+      case 'worker_threads':
+        return {}; // Empty implementation
+      case 'koffi':
+      case 're2':
+        return {}; // Empty implementation
+      default:
+        console.warn(`Mock require called for module: ${moduleName}`);
+        return {};
     }
-    
-    send(data) {
-      console.log('Mock WebSocket send:', data);
-      return true;
+  };
+} else {
+  // Don't override require if it's already defined
+  const originalRequire = global.require;
+  global.require = (moduleName) => {
+    if (moduleName === 'ws') {
+      return { WebSocket }; // Return our polyfill for ws
     }
-    
-    close() {
-      this.readyState = 3;
-      if (typeof this.onclose === 'function') {
-        this.onclose({ target: this });
-      }
+    try {
+      return originalRequire(moduleName);
+    } catch (e) {
+      console.warn(`Failed to require module: ${moduleName}`);
+      return {};
     }
-  }
-  
-  global.ws = { WebSocket: MockWebSocket };
+  };
 }
 
 // Fix for snarkjs which tries to access process.browser
@@ -78,34 +94,6 @@ if (typeof global.TextEncoder === 'undefined' && !isServiceWorker) {
 // Handle other Node.js-specific functionality
 if (typeof global.global === 'undefined') {
   global.global = global;
-}
-
-// Mock require for browser environment
-if (typeof global.require === 'undefined') {
-  global.require = (moduleName) => {
-    console.warn(`Mock require called for module: ${moduleName}`);
-    
-    // Return mock implementations for common modules
-    switch (moduleName) {
-      case 'fs':
-        return global.fs;
-      case 'path':
-        return global.path;
-      case 'os':
-        return global.os;
-      case 'crypto':
-        return global.crypto;
-      case 'worker_threads':
-        return {}; // Empty implementation
-      case 'koffi':
-      case 're2':
-        return {}; // Empty implementation
-      case 'ws':
-        return { WebSocket: global.WebSocket }; // Return WebSocket implementation
-      default:
-        return {};
-    }
-  };
 }
 
 // Handle crypto.getRandomValues polyfill if needed

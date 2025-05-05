@@ -1,7 +1,4 @@
-// Import WebSocket fix before anything else
-import '../utils/fix-websocket';
-
-// Import polyfills first
+// Import polyfills
 import '../utils/polyfills';
 
 // This script runs in the context of the web page
@@ -51,6 +48,30 @@ class ReclaimContentScript {
           }, '*');
           sendResponse({ success: true });
           break;
+        
+        case MESSAGER_ACTIONS.GENERATE_PROOF:
+          // Handle proof generation in content script
+          console.log('[CONTENT] Received proof generation request:', data);
+          this.generateProof(data)
+            .then(proof => {
+              console.log('[CONTENT] Proof generation successful');
+              sendResponse({ 
+                success: true, 
+                proof,
+                source: MESSAGER_TYPES.CONTENT_SCRIPT,
+                target: message.source
+              });
+            })
+            .catch(error => {
+              console.error('[CONTENT] Error generating proof:', error);
+              sendResponse({ 
+                success: false, 
+                error: error.message || 'Unknown error in proof generation',
+                source: MESSAGER_TYPES.CONTENT_SCRIPT,
+                target: message.source
+              });
+            });
+          return true; // Keep the message channel open for async response
           
         default:
           sendResponse({ success: false, error: 'Unknown action' });
@@ -100,6 +121,48 @@ class ReclaimContentScript {
             }, '*');
           }
         });
+      }
+    }
+    
+    // Function to generate proof in the content script context
+    async generateProof(claimData) {
+      try {
+        // Validate the claim data
+        if (!claimData) {
+          throw new Error('No claim data provided');
+        }
+
+        // Ensure clean data by removing any potential encoding issues
+        let cleanData;
+        try {
+          // Round-trip through JSON to ensure clean UTF-8
+          cleanData = JSON.parse(JSON.stringify(claimData));
+        } catch (e) {
+          console.warn('[CONTENT] Error cleaning data:', e);
+          cleanData = claimData;
+        }
+
+        console.log('[CONTENT] Generating mock proof with provided data');
+        
+        // Create a mock proof response
+        const mockId = 'mock-claim-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+        const mockProof = {
+          claimId: mockId,
+          ownerPublicKey: '0x123456789abcdef',
+          epoch: Math.floor(Date.now() / 1000),
+          timestampS: Math.floor(Date.now() / 1000),
+          identifier: cleanData.name || 'mock-identifier',
+          provider: cleanData.name || 'http',
+          parameters: cleanData.params || {},
+          signatures: [],
+          mockData: true
+        };
+        
+        console.log('[CONTENT] Mock proof generation successful');
+        return mockProof;
+      } catch (error) {
+        console.error('[CONTENT] Error generating proof:', error);
+        throw error;
       }
     }
     

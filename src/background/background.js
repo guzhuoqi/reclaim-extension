@@ -1,7 +1,4 @@
-// Import WebSocket fix before anything else
-import '../utils/fix-websocket';
-
-// Import polyfills first
+// Import polyfills
 import '../utils/polyfills';
 
 // Import necessary utilities and libraries
@@ -53,32 +50,6 @@ class ReclaimExtensionManager {
                     }
                     break;
 
-                // Handle offscreen ready message
-                case MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY:
-                    if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
-                        console.log('[BACKGROUND] Offscreen document ready signal received');
-                        // Always respond with success to acknowledge receipt
-                        sendResponse({ 
-                            success: true, 
-                            source: MESSAGER_TYPES.BACKGROUND,
-                            target: MESSAGER_TYPES.OFFSCREEN
-                        });
-                        return true; // Keep channel open for async response
-                    } else {
-                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
-                        sendResponse({ success: false, error: 'Action not supported' });
-                    }
-                    break;
-                
-                // Handle ping from proof-generator to offscreen
-                case 'PING_OFFSCREEN':
-                    if (target === MESSAGER_TYPES.OFFSCREEN) {
-                        // Just relay the message to offscreen, response handled elsewhere
-                        chrome.runtime.sendMessage(message);
-                        sendResponse({ success: true });
-                    }
-                    break;
-
                 // Handle start verification message
                 case MESSAGER_ACTIONS.START_VERIFICATION:
                     if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
@@ -97,8 +68,6 @@ class ReclaimExtensionManager {
                     if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
                         try {
                             console.log('[BACKGROUND] Generating proof with data:', data);
-                            // This will communicate with offscreen internally
-                            const proof = await generateProof(data);
                             sendResponse({ success: true, proof });
                         } catch (error) {
                             console.error('[BACKGROUND] Error generating proof:', error);
@@ -108,6 +77,35 @@ class ReclaimExtensionManager {
                     } else {
                         console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
                         sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    break;
+                    
+                // Handle claim generation requests with mock implementation
+                case MESSAGER_ACTIONS.GENERATE_CLAIM_ON_ATTESTOR:
+                    try {
+                        console.log('[BACKGROUND] Generating mock claim');
+                        
+                        // Create a mock response
+                        const mockId = 'mock-claim-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+                        const mockResult = {
+                            claimId: mockId,
+                            ownerPublicKey: '0x123456789abcdef',
+                            epoch: Math.floor(Date.now() / 1000),
+                            timestampS: Math.floor(Date.now() / 1000),
+                            identifier: data.name || 'mock-identifier',
+                            provider: data.name || 'http',
+                            parameters: data.params || {},
+                            signatures: [],
+                            mockData: true
+                        };
+                        
+                        sendResponse({ success: true, result: mockResult });
+                    } catch (error) {
+                        console.error('[BACKGROUND] Error generating mock claim:', error);
+                        sendResponse({ 
+                            success: false, 
+                            error: error.message || 'Unknown error generating mock claim'
+                        });
                     }
                     break;
 
@@ -293,33 +291,18 @@ class ReclaimExtensionManager {
 
     async generateAndSubmitProof(request, criteria) {
         try {
-            console.log('[BACKGROUND] Generating proof for matched request');
-            
-            // Prepare the claim data
-            const claimData = {
-                name: "http",
-                params: {
-                    url: request.url,
-                    method: request.method,
-                    responseMatches: criteria.responseMatches || [],
-                    responseRedactions: criteria.responseRedactions || []
-                },
-                secretParams: {
-                    headers: {}
-                },
-                // You may need to get these values from appropriate sources
-                ownerPrivateKey: "0x1234567456789012345678901234567890123456789012345678901234567890", // This should be securely generated or provided
-                client: {
-                    url: "wss://attestor.reclaimprotocol.org/ws"
-                }
+            // TODO: Generate proof
+            const proof = {
+                claimId: 'mock-claim-123',
+                ownerPublicKey: '0x123456789abcdef',
+                epoch: Math.floor(Date.now() / 1000),
+                timestampS: Math.floor(Date.now() / 1000),
+                identifier: criteria.name || 'mock-identifier',
+                provider: criteria.name || 'http',
+                parameters: criteria.params || {},
+                signatures: [],
+                mockData: true
             };
-            
-            // Call the generateProof utility function - this will handle offscreen communication internally
-            const proof = await generateProof(claimData);
-            console.log('[BACKGROUND] Proof generated:', proof);
-            
-            // Submit the proof
-            await this.submitProof(proof);
             
             // Disable network monitoring as we've found what we need
             this.disableNetworkMonitoring();
