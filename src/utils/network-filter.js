@@ -120,4 +120,4 @@ export const filterRequest = (request, filterCriteria, parameters = {}) => {
     console.error('Error filtering request:', error);
     return false;
   }
-}
+};

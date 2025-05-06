@@ -8,6 +8,7 @@ import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../uti
 import { generateProof } from '../utils/proof-generator.js';
 import { testPolyfills } from '../utils/polyfill-test.js';
 import { createClaimObject } from '../utils/claim-creator.js';
+import { replayRequest } from '../utils/replay-request.js';
 
 class ReclaimExtensionManager {
     constructor() {
@@ -21,6 +22,9 @@ class ReclaimExtensionManager {
         this.requestHeadersMap = new Map();
         this.requestBodyMap = new Map();
         this.pendingRequests = new Map();
+        
+        // Set to track processed requests to avoid duplicates
+        this.processedRequests = new Set();
         
         // Initialize extension
         this.init();
@@ -168,6 +172,9 @@ class ReclaimExtensionManager {
         if (this.isNetworkListenerActive) return;
 
         try {
+            // Reset the processed requests set
+            this.processedRequests = new Set();
+            
             // Store bound methods to allow proper removal later
             this.boundHandleNetworkRequest = this.handleNetworkRequest.bind(this);
             this.boundHandleRequestHeaders = this.handleRequestHeaders.bind(this);
@@ -410,12 +417,26 @@ class ReclaimExtensionManager {
     // Process the complete request when we have both headers and body
     async processCompleteRequest(requestId) {
         try {
+            // If network monitoring is already disabled, skip processing
+            // This prevents multiple processing of the same request
+            if (!this.isNetworkListenerActive) {
+                return;
+            }
+            
+            // If we've already processed this request, skip it
+            if (this.processedRequests.has(requestId)) {
+                return;
+            }
+            
             const headerInfo = this.requestHeadersMap.get(requestId);
             const bodyInfo = this.requestBodyMap.get(requestId);
             
             if (!headerInfo || !bodyInfo) {
                 return; // Still missing part of the request
             }
+            
+            // Mark this request as processed
+            this.processedRequests.add(requestId);
             
             // Try to get cookies using chrome.cookies API if they weren't found in headers
             let cookieStr = headerInfo.cookieStr;
@@ -438,7 +459,10 @@ class ReclaimExtensionManager {
             );
             
             if (matchingCriteria) {
-                // ONLY log detailed information for matching requests
+                // IMMEDIATELY disable network monitoring to prevent further captures
+                // This must be done before the async replay to prevent race conditions
+                this.disableNetworkMonitoring();
+                
                 console.log('[BACKGROUND] ==========================================');
                 console.log('[BACKGROUND] MATCHING REQUEST FOUND');
                 console.log('[BACKGROUND] URL:', formattedRequest.url);
@@ -455,6 +479,44 @@ class ReclaimExtensionManager {
                     formattedRequest.body ? 
                     `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` : 
                     'No body for the matching request!');
+                
+                // Create a flag to prevent multiple replays for the same request
+                let replayCompleted = false;
+                
+                // Replay the request to get the response body
+                console.log('[BACKGROUND] Replaying request to get response body...');
+                try {
+                    if (!replayCompleted) {
+                        replayCompleted = true;
+                        // Use a 1500ms delay for the initial request to avoid rate limiting
+                        const responseResult = await replayRequest(formattedRequest, true, 1500);
+                        
+                        // Add response body to the request object
+                        formattedRequest.responseText = responseResult.responseText;
+                        
+                        // Check if we got a rate limit or error response
+                        if (responseResult.status >= 400) {
+                            console.warn(`[BACKGROUND] Received error status: ${responseResult.status} - ${responseResult.statusText}`);
+                            if (responseResult.responseText.includes('429') || responseResult.responseText.includes('Too Many Requests')) {
+                                console.warn('[BACKGROUND] Rate limiting detected in response text');
+                            }
+                        }
+                        
+                        // Log response info
+                        console.log('[BACKGROUND] Response successfully obtained:');
+                        console.log('[BACKGROUND] - Status:', responseResult.status);
+                        console.log('[BACKGROUND] - Content Type:', responseResult.contentType);
+                        console.log('[BACKGROUND] - Response body length:', responseResult.responseText.length);
+                        console.log('[BACKGROUND] - Response body:', responseResult.responseText);
+                    } else {
+                        console.log('[BACKGROUND] Replay already completed, skipping duplicate replay');
+                    }
+                    
+                } catch (replayError) {
+                    console.error('[BACKGROUND] Failed to replay request:', replayError);
+                    // We continue even if replay fails - some providers may not require the response body
+                }
+                
                 console.log('[BACKGROUND] ==========================================');
                 
                 // Generate and submit proof when we find a matching request
@@ -507,9 +569,6 @@ class ReclaimExtensionManager {
             const proof = await generateProof(claimData);
             
             console.log('[BACKGROUND] Proof generated successfully:', proof);
-            
-            // Disable network monitoring as we've found what we need
-            this.disableNetworkMonitoring();
             
             // Submit the proof
             await this.submitProof(proof);

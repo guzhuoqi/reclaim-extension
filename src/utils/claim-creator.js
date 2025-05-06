@@ -52,6 +52,21 @@ export const createClaimObject = (request, providerData) => {
         params.body = request.body;
     }
     
+    // Process response body if available
+    if (request.responseText) {
+        // Store response body in params for matching and extraction
+        params.responseText = request.responseText;
+        
+        // Log that response body was found (only log length for privacy)
+        console.log('[CLAIM-CREATOR] Response body found with length:', request.responseText.length);
+        
+        // For development/debugging, log a snippet of the response
+        const snippet = request.responseText.substring(0, 100) + (request.responseText.length > 100 ? '...' : '');
+        console.log('[CLAIM-CREATOR] Response snippet:', snippet);
+    } else {
+        console.log('[CLAIM-CREATOR] No response body available for the claim');
+    }
+    
     // Process cookie string if available in request
     if (request.cookieStr) {
         secretParams.cookieStr = request.cookieStr;
