@@ -7,6 +7,7 @@ import { fetchProviderData, updateSessionStatus } from '../utils/start-verificat
 import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/interfaces.js';
 import { generateProof } from '../utils/proof-generator.js';
 import { testPolyfills } from '../utils/polyfill-test.js';
+import { createClaimObject } from '../utils/claim-creator.js';
 
 class ReclaimExtensionManager {
     constructor() {
@@ -15,7 +16,12 @@ class ReclaimExtensionManager {
         this.disableNetworkMonitoring();
         this.providerData = null;
         this.parameters = null;
-
+        
+        // Create maps to store request data
+        this.requestHeadersMap = new Map();
+        this.requestBodyMap = new Map();
+        this.pendingRequests = new Map();
+        
         // Initialize extension
         this.init();
     }
@@ -62,53 +68,7 @@ class ReclaimExtensionManager {
                         sendResponse({ success: false, error: 'Action not supported' });
                     }
                     break;
-
-                // Handle generate proof request message
-                case MESSAGER_ACTIONS.GENERATE_PROOF_REQUEST:
-                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
-                        try {
-                            console.log('[BACKGROUND] Generating proof with data:', data);
-                            sendResponse({ success: true, proof });
-                        } catch (error) {
-                            console.error('[BACKGROUND] Error generating proof:', error);
-                            sendResponse({ success: false, error: error.message });
-                        }
-                        break;
-                    } else {
-                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
-                        sendResponse({ success: false, error: 'Action not supported' });
-                    }
-                    break;
                     
-                // Handle claim generation requests with mock implementation
-                case MESSAGER_ACTIONS.GENERATE_CLAIM_ON_ATTESTOR:
-                    try {
-                        console.log('[BACKGROUND] Generating mock claim');
-                        
-                        // Create a mock response
-                        const mockId = 'mock-claim-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
-                        const mockResult = {
-                            claimId: mockId,
-                            ownerPublicKey: '0x123456789abcdef',
-                            epoch: Math.floor(Date.now() / 1000),
-                            timestampS: Math.floor(Date.now() / 1000),
-                            identifier: data.name || 'mock-identifier',
-                            provider: data.name || 'http',
-                            parameters: data.params || {},
-                            signatures: [],
-                            mockData: true
-                        };
-                        
-                        sendResponse({ success: true, result: mockResult });
-                    } catch (error) {
-                        console.error('[BACKGROUND] Error generating mock claim:', error);
-                        sendResponse({ 
-                            success: false, 
-                            error: error.message || 'Unknown error generating mock claim'
-                        });
-                    }
-                    break;
-
                 // Handle offscreen document ready message
                 case MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY:
                     if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
@@ -204,77 +164,212 @@ class ReclaimExtensionManager {
         }
     }
 
-    async injectCustomScript(tabId, scriptContent) {
-        try {
-            // Send a message to the content script to inject the script
-            await chrome.tabs.sendMessage(tabId, {
-                action: 'INJECT_CUSTOM_SCRIPT',
-                data: { script: scriptContent }
-            });
-            console.log('Custom script injection requested via content script');
-        } catch (error) {
-            console.error('Error requesting script injection:', error);
-
-            // Fallback: Try to inject a script loader
-            try {
-                await chrome.scripting.executeScript({
-                    target: { tabId },
-                    func: (scriptText) => {
-                        // Create a blob URL for the script
-                        const blob = new Blob([scriptText], { type: 'application/javascript' });
-                        const url = URL.createObjectURL(blob);
-
-                        // Create and append a script tag with the blob URL
-                        const script = document.createElement('script');
-                        script.src = url;
-                        script.onload = () => URL.revokeObjectURL(url);
-                        document.head.appendChild(script);
-                    },
-                    args: [scriptContent]
-                });
-                console.log('Custom script injected via fallback method');
-            } catch (fallbackError) {
-                console.error('Fallback script injection failed:', fallbackError);
-            }
-        }
-    }
-
     enableNetworkMonitoring() {
         if (this.isNetworkListenerActive) return;
 
-        // Set up network request listeners
-        chrome.webRequest.onBeforeRequest.addListener(
-            this.handleNetworkRequest.bind(this),
-            { urls: ["<all_urls>"] },
-            ["requestBody"]
-        );
-
-        this.isNetworkListenerActive = true;
-        console.log('Network monitoring enabled');
+        try {
+            // Store bound methods to allow proper removal later
+            this.boundHandleNetworkRequest = this.handleNetworkRequest.bind(this);
+            this.boundHandleRequestHeaders = this.handleRequestHeaders.bind(this);
+            this.boundHandleBeforeSendHeaders = this.handleBeforeSendHeaders.bind(this);
+            
+            // Listen for request bodies
+            chrome.webRequest.onBeforeRequest.addListener(
+                this.boundHandleNetworkRequest,
+                { urls: ["<all_urls>"] },
+                ["requestBody"]
+            );
+    
+            // Listen for request headers before they're sent
+            chrome.webRequest.onBeforeSendHeaders.addListener(
+                this.boundHandleBeforeSendHeaders,
+                { urls: ["<all_urls>"] },
+                ["requestHeaders"]
+            );
+            
+            // Listen for request headers after they're sent (includes additional headers)
+            chrome.webRequest.onSendHeaders.addListener(
+                this.boundHandleRequestHeaders,
+                { urls: ["<all_urls>"] },
+                ["requestHeaders"]
+            );
+    
+            this.isNetworkListenerActive = true;
+            console.log('[BACKGROUND] Network monitoring enabled');
+        } catch (error) {
+            console.error('[BACKGROUND] Error enabling network monitoring:', error);
+        }
     }
 
     disableNetworkMonitoring() {
         if (!this.isNetworkListenerActive) return;
 
-        chrome.webRequest.onBeforeRequest.removeListener(this.handleNetworkRequest.bind(this));
-        this.isNetworkListenerActive = false;
-        console.log('Network monitoring disabled');
+        try {
+            chrome.webRequest.onBeforeRequest.removeListener(this.boundHandleNetworkRequest);
+            chrome.webRequest.onBeforeSendHeaders.removeListener(this.boundHandleBeforeSendHeaders);
+            chrome.webRequest.onSendHeaders.removeListener(this.boundHandleRequestHeaders);
+            this.isNetworkListenerActive = false;
+            console.log('Network monitoring disabled');
+            
+            // Clear request maps
+            this.requestHeadersMap.clear();
+            this.requestBodyMap.clear();
+            this.pendingRequests.clear();
+        } catch (error) {
+            console.error('[BACKGROUND] Error disabling network monitoring:', error);
+        }
     }
-
+    
+    // Generate a unique request ID to correlate different parts of the same request
+    generateRequestId(details) {
+        // Include requestId, url and timestamp to ensure uniqueness
+        return `${details.requestId}_${details.url}_${Date.now()}`;
+    }
+    
+    // Extract cookie string from request headers
+    extractCookieStr(requestHeaders) {
+        if (!requestHeaders) return null;
+        
+        // Try to find the Cookie header
+        const cookieHeader = requestHeaders.find(header => 
+            header.name.toLowerCase() === 'cookie'
+        );
+        
+        if (cookieHeader) {
+            return cookieHeader.value;
+        }
+        
+        // If no cookie header found in request headers, try to get from chrome.cookies API
+        // Note: This requires the "cookies" permission in manifest.json
+        return null;
+    }
+    
+    // Additional method to get cookies for a URL using chrome.cookies API
+    async getCookiesForUrl(url) {
+        try {
+            if (!chrome.cookies || !chrome.cookies.getAll) {
+                return null;
+            }
+            
+            const urlObj = new URL(url);
+            const domain = urlObj.hostname;
+            
+            const cookies = await chrome.cookies.getAll({ domain });
+            if (cookies && cookies.length > 0) {
+                const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+                return cookieStr;
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('[BACKGROUND] Error getting cookies for URL:', error);
+            return null;
+        }
+    }
+    
+    // Handle before send headers event to capture headers early
+    handleBeforeSendHeaders(details) {
+        try {
+            
+            const requestId = details.requestId;
+            
+            // Convert headers array to object for easier use
+            const headersObject = {};
+            if (details.requestHeaders) {
+                details.requestHeaders.forEach(header => {
+                    headersObject[header.name] = header.value;
+                });
+            }
+            
+            // Extract cookie string
+            const cookieStr = this.extractCookieStr(details.requestHeaders);
+            
+            // Store headers with the request ID
+            this.requestHeadersMap.set(requestId, {
+                timestamp: Date.now(),
+                url: details.url,
+                headers: headersObject,
+                cookieStr: cookieStr
+            });
+            
+            // Clean up old entries from requestHeadersMap
+            this.cleanupRequestMaps();
+            
+            // Check if we already have the body for this request
+            if (this.requestBodyMap.has(requestId)) {
+                this.processCompleteRequest(requestId);
+            }
+        } catch (error) {
+            console.error('[BACKGROUND] Error in handleBeforeSendHeaders:', error);
+        }
+    }
+    
+    // Handle send headers event - this happens after the request is sent
+    handleRequestHeaders(details) {
+        try {
+            
+            const requestId = details.requestId;
+            
+            // Update the headers if we already have them from before send
+            if (this.requestHeadersMap.has(requestId)) {
+                const existingData = this.requestHeadersMap.get(requestId);
+                
+                // Convert the headers array to an object
+                const headersObject = {};
+                if (details.requestHeaders) {
+                    details.requestHeaders.forEach(header => {
+                        headersObject[header.name] = header.value;
+                    });
+                }
+                
+                // Extract cookie string
+                const cookieStr = this.extractCookieStr(details.requestHeaders) || existingData.cookieStr;
+                
+                // Update with potentially more complete headers
+                existingData.headers = headersObject;
+                existingData.cookieStr = cookieStr;
+                this.requestHeadersMap.set(requestId, existingData);
+                
+                // Check if we have the body for this request
+                if (this.requestBodyMap.has(requestId)) {
+                    this.processCompleteRequest(requestId);
+                }
+            } else {
+                // If we don't have headers yet, add them
+                const headersObject = {};
+                if (details.requestHeaders) {
+                    details.requestHeaders.forEach(header => {
+                        headersObject[header.name] = header.value;
+                    });
+                }
+                
+                // Extract cookie string
+                const cookieStr = this.extractCookieStr(details.requestHeaders);
+                
+                this.requestHeadersMap.set(requestId, {
+                    timestamp: Date.now(),
+                    url: details.url,
+                    headers: headersObject,
+                    cookieStr: cookieStr
+                });
+                
+                // Check if we have the body for this request
+                if (this.requestBodyMap.has(requestId)) {
+                    this.processCompleteRequest(requestId);
+                }
+            }
+        } catch (error) {
+            console.error('[BACKGROUND] Error handling request headers:', error);
+        }
+    }
+    
+    // Handle request body
     async handleNetworkRequest(details) {
         try {
-            // Skip if provider data is not loaded yet
-            if (!this.providerData || !this.providerData.requestData) {
-                return;
-            }
-
-            // Format the request object to match what filterRequest expects
-            const formattedRequest = {
-                url: details.url,
-                method: details.method || 'GET', // Default to GET if method not provided
-                body: null
-            };
-
+            
+            const requestId = details.requestId;
+            let body = null;
+            
             // Extract and format request body if available
             if (details.requestBody) {
                 if (details.requestBody.raw) {
@@ -282,51 +377,132 @@ class ReclaimExtensionManager {
                     const encoder = new TextDecoder('utf-8');
                     try {
                         const rawData = details.requestBody.raw[0].bytes;
-                        formattedRequest.body = encoder.decode(rawData);
+                        body = encoder.decode(rawData);
                     } catch (e) {
                         console.warn('Could not decode request body', e);
                     }
                 } else if (details.requestBody.formData) {
                     // Form data
-                    formattedRequest.body = JSON.stringify(details.requestBody.formData);
+                    body = JSON.stringify(details.requestBody.formData);
                 }
             }
-
-            // requestData is an array of objects check if any of the objects match the request
+            
+            // Store the body information
+            this.requestBodyMap.set(requestId, {
+                timestamp: Date.now(),
+                url: details.url,
+                method: details.method || 'GET',
+                body
+            });
+            
+            // Clean up old entries
+            this.cleanupRequestMaps();
+            
+            // Check if we already have headers for this request
+            if (this.requestHeadersMap.has(requestId)) {
+                await this.processCompleteRequest(requestId);
+            }
+        } catch (error) {
+            console.error('[BACKGROUND] Error handling network request:', error);
+        }
+    }
+    
+    // Process the complete request when we have both headers and body
+    async processCompleteRequest(requestId) {
+        try {
+            const headerInfo = this.requestHeadersMap.get(requestId);
+            const bodyInfo = this.requestBodyMap.get(requestId);
+            
+            if (!headerInfo || !bodyInfo) {
+                return; // Still missing part of the request
+            }
+            
+            // Try to get cookies using chrome.cookies API if they weren't found in headers
+            let cookieStr = headerInfo.cookieStr;
+            if (!cookieStr) {
+                cookieStr = await this.getCookiesForUrl(bodyInfo.url);
+            }
+            
+            // Create complete request object
+            const formattedRequest = {
+                url: bodyInfo.url,
+                method: bodyInfo.method,
+                body: bodyInfo.body,
+                headers: headerInfo.headers || {},
+                cookieStr: cookieStr
+            };
+            
+            // Check if this request matches our criteria
             const matchingCriteria = this.providerData.requestData.find(criteria => 
                 filterRequest(formattedRequest, criteria, this.parameters)
             );
             
             if (matchingCriteria) {
-                console.log('Matching request found:', formattedRequest);
+                // ONLY log detailed information for matching requests
+                console.log('[BACKGROUND] ==========================================');
+                console.log('[BACKGROUND] MATCHING REQUEST FOUND');
+                console.log('[BACKGROUND] URL:', formattedRequest.url);
+                console.log('[BACKGROUND] Method:', formattedRequest.method);
+                
+                if (formattedRequest.cookieStr) {
+                    console.log('[BACKGROUND] Cookie string present for the matching request with length:', formattedRequest.cookieStr.length);
+                } else {
+                    console.log('[BACKGROUND] No cookie string found for the matching request!');
+                }
+                
+                // Only log body type and length for privacy
+                console.log('[BACKGROUND] Body:', 
+                    formattedRequest.body ? 
+                    `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` : 
+                    'No body for the matching request!');
+                console.log('[BACKGROUND] ==========================================');
+                
                 // Generate and submit proof when we find a matching request
                 try {
-                    await this.generateAndSubmitProof(formattedRequest, matchingCriteria);
+                    // Create claim object from the request and providerData
+                    const claimData = createClaimObject(formattedRequest, matchingCriteria);
+                    
+                    // Clean up the map entries for this request
+                    this.requestHeadersMap.delete(requestId);
+                    this.requestBodyMap.delete(requestId);
+                    
+                    // Process the proof
+                    await this.generateAndSubmitProof(claimData);
                 } catch (error) {
-                    console.error('Error handling network request:', error);
-                    // Don't throw here to avoid breaking the web request listener
+                    console.error('[BACKGROUND] Error processing matching request:', error);
                 }
             }
             
         } catch (error) {
-            console.error('Error handling network request:', error);
+            console.error('[BACKGROUND] Error processing complete request:', error);
+        }
+    }
+    
+    // Clean up old entries from request maps (older than 30 seconds)
+    cleanupRequestMaps() {
+        const now = Date.now();
+        const timeout = 30000; // 30 seconds
+        
+        // Clean up requestHeadersMap
+        for (const [key, value] of this.requestHeadersMap.entries()) {
+            if (now - value.timestamp > timeout) {
+                this.requestHeadersMap.delete(key);
+            }
+        }
+        
+        // Clean up requestBodyMap
+        for (const [key, value] of this.requestBodyMap.entries()) {
+            if (now - value.timestamp > timeout) {
+                this.requestBodyMap.delete(key);
+            }
         }
     }
 
-    async generateAndSubmitProof(request, criteria) {
+    async generateAndSubmitProof(claimData) {
         try {
             // Use the proof-generator utility which leverages offscreen document
-            console.log('[BACKGROUND] Generating proof for request:', request);
-            
-            // Prepare claim data
-            const claimData = {
-                provider: criteria.name || 'http',
-                name: criteria.name || 'http',
-                params: criteria.params || {},
-                contextId: crypto.randomUUID(), // Generate a unique context ID
-                request: request // Include the request data for proof generation
-            };
-            
+            console.log('[BACKGROUND] Generating proof for claim data:', claimData);
+                        
             // Generate proof using offscreen document
             const proof = await generateProof(claimData);
             
@@ -383,6 +559,41 @@ class ReclaimExtensionManager {
         } catch (error) {
             console.error('[BACKGROUND] Error submitting proof:', error);
             throw error;
+        }
+    }
+
+    async injectCustomScript(tabId, scriptContent) {
+        try {
+            // Send a message to the content script to inject the script
+            await chrome.tabs.sendMessage(tabId, {
+                action: 'INJECT_CUSTOM_SCRIPT',
+                data: { script: scriptContent }
+            });
+            console.log('Custom script injection requested via content script');
+        } catch (error) {
+            console.error('Error requesting script injection:', error);
+
+            // Fallback: Try to inject a script loader
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId },
+                    func: (scriptText) => {
+                        // Create a blob URL for the script
+                        const blob = new Blob([scriptText], { type: 'application/javascript' });
+                        const url = URL.createObjectURL(blob);
+
+                        // Create and append a script tag with the blob URL
+                        const script = document.createElement('script');
+                        script.src = url;
+                        script.onload = () => URL.revokeObjectURL(url);
+                        document.head.appendChild(script);
+                    },
+                    args: [scriptContent]
+                });
+                console.log('Custom script injected via fallback method');
+            } catch (fallbackError) {
+                console.error('Fallback script injection failed:', fallbackError);
+            }
         }
     }
 }

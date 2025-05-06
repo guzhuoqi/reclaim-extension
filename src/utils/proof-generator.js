@@ -7,6 +7,8 @@ import { createClaimOnAttestor } from '@reclaimprotocol/attestor-core';
 // Track the offscreen document status
 let offscreenReady = false;
 let offscreenDocTimeout = null;
+// Track the creation promise to prevent multiple creation attempts
+let offscreenCreationPromise = null;
 
 // Global listener for the ready signal from offscreen document
 // We need to set this up immediately to catch the ready signal
@@ -127,11 +129,21 @@ export const generateProof = async (claimData) => {
 
 // Function to ensure the offscreen document exists and is ready
 async function ensureOffscreenDocument() {
+  // Use a shared promise to prevent multiple creation attempts
+  if (offscreenReady) return true;
+  
   const exists = await checkOffscreenExists();
   
   if (!exists) {
     console.log('[PROOF-GENERATOR] Offscreen document does not exist, creating it');
-    await createOffscreenDocument();
+    if (!offscreenCreationPromise) {
+      // Only create if not already being created
+      offscreenCreationPromise = createOffscreenDocument().finally(() => {
+        // Reset the creation promise when done
+        offscreenCreationPromise = null;
+      });
+    }
+    await offscreenCreationPromise;
   }
   
   // Wait for the offscreen document to be ready

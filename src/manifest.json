@@ -33,7 +33,8 @@
     "webNavigation",
     "scripting",
     "tabs",
-    "offscreen"
+    "offscreen",
+    "cookies"
   ],
   "web_accessible_resources": [
     {
