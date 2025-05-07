@@ -2,7 +2,7 @@
 import '../utils/polyfills';
 
 // This script runs in the context of the web page
-import { RECLAIM_SDK_ACTIONS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/interfaces.js';
+import { RECLAIM_SDK_ACTIONS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/constants';
 
 class ReclaimContentScript {
     constructor() {

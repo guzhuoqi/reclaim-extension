@@ -1,9 +1,9 @@
 // Import necessary utilities and interfaces
-import '../utils/polyfills.js';
-import { MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/interfaces.js';
+import '../utils/polyfills';
+import { MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/constants';
 import { createClaimOnAttestor } from '@reclaimprotocol/attestor-core';
 // Import our specialized WebSocket implementation for offscreen document
-import { WebSocket } from '../utils/offscreen-websocket.js';
+import { WebSocket } from '../utils/offscreen-websocket';
 
 // Ensure WebSocket is globally available in the offscreen context
 window.WebSocket = WebSocket;

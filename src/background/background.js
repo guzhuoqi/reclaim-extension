@@ -2,13 +2,13 @@
 import '../utils/polyfills';
 
 // Import necessary utilities and libraries
-import { filterRequest } from '../utils/network-filter.js';
-import { fetchProviderData, updateSessionStatus } from '../utils/start-verification.js';
-import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/interfaces.js';
-import { generateProof } from '../utils/proof-generator.js';
-import { testPolyfills } from '../utils/polyfill-test.js';
-import { createClaimObject } from '../utils/claim-creator.js';
-import { replayRequest } from '../utils/replay-request.js';
+import { filterRequest } from '../utils/claim-creator';
+import { fetchProviderData, updateSessionStatus } from '../utils/fetch-calls';
+import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/constants';
+import { generateProof } from '../utils/proof-generator';
+import { testPolyfills } from '../utils/polyfill-test';
+import { createClaimObject } from '../utils/claim-creator';
+import { replayRequest } from '../utils/claim-creator';
 
 class ReclaimExtensionManager {
     constructor() {

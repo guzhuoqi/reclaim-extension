@@ -1,4 +1,4 @@
-import { API_ENDPOINTS } from './constants.js';
+import { API_ENDPOINTS } from './constants';
 
 export const fetchProviderData = async (providerId) => {
     try {

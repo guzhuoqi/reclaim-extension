@@ -1,8 +1,7 @@
 // Import polyfills
-import './polyfills';
+import '../polyfills';
 
-import { MESSAGER_ACTIONS, MESSAGER_TYPES } from './interfaces.js';
-import { createClaimOnAttestor } from '@reclaimprotocol/attestor-core';
+import { MESSAGER_ACTIONS, MESSAGER_TYPES } from '../constants/index';
 
 // Track the offscreen document status
 let offscreenReady = false;
