@@ -38,8 +38,9 @@ export const generateProof = async (claimData) => {
     await ensureOffscreenDocument();
     
     // Clean the data to avoid encoding issues
-    let cleanData = {
+    let cleanData = claimData || {
       "name": "http",
+      "sessionId": "4343452dcx",
       "description": [
           "Example to fetch the current price of ETH in USD",
           "from the CoinGecko API",
@@ -63,17 +64,6 @@ export const generateProof = async (claimData) => {
           }
       }
   }
-    // let cleanData;
-    // if (claimData) {
-    //   try {
-    //     cleanData = JSON.parse(JSON.stringify(claimData));
-    //   } catch (e) {
-    //     console.warn('[PROOF-GENERATOR] Error cleaning data:', e);
-    //     cleanData = claimData;
-    //   }
-    // } else {
-    //   throw new Error('No claim data provided for proof generation');
-    // }
     
     // Generate the proof using the offscreen document
     return new Promise((resolve, reject) => {

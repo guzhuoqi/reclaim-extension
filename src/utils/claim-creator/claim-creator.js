@@ -1,4 +1,12 @@
-export const createClaimObject = (request, providerData) => {
+import { 
+    extractDynamicParamNames, 
+    extractParamsFromUrl, 
+    extractParamsFromBody, 
+    extractParamsFromResponse,
+    separateParams
+} from './params-extractor';
+
+export const createClaimObject = (request, providerData, sessionId) => {
     console.log('[CLAIM-CREATOR] Creating claim object from request data');
     
     // Define public headers that should be in params
@@ -52,69 +60,71 @@ export const createClaimObject = (request, providerData) => {
         params.body = request.body;
     }
     
-    // Process response body if available
-    if (request.responseText) {
-        // Store response body in params for matching and extraction
-        params.responseText = request.responseText;
-        
-        // Log that response body was found (only log length for privacy)
-        console.log('[CLAIM-CREATOR] Response body found with length:', request.responseText.length);
-        
-        // For development/debugging, log a snippet of the response
-        const snippet = request.responseText.substring(0, 100) + (request.responseText.length > 100 ? '...' : '');
-        console.log('[CLAIM-CREATOR] Response snippet:', snippet);
-    } else {
-        console.log('[CLAIM-CREATOR] No response body available for the claim');
-    }
-    
     // Process cookie string if available in request
     if (request.cookieStr) {
         secretParams.cookieStr = request.cookieStr;
     } 
     
-    // Extract dynamic parameters from URL, body, and response matches
-    const paramValues = {};
+    // Extract dynamic parameters from various sources
+    const allParamValues = {};
     
-    // Function to extract dynamic parameters of the form {{PARAM_NAME}}
-    const extractDynamicParams = (text) => {
-        if (!text) return [];
-        const matches = text.match(/{{([^}]+)}}/g) || [];
-        return matches.map(match => match.substring(2, match.length - 2));
-    };
+    // 1. Extract params from URL if provider has URL template
+    if (providerData.urlTemplate && request.url) {
+        extractParamsFromUrl(providerData.urlTemplate, request.url, allParamValues);
+    }
     
-    // Extract dynamic params from URL
-    const urlParams = extractDynamicParams(params.url);
+    // 2. Extract params from request body if provider has body template
+    if (providerData.bodyTemplate && request.body) {
+        extractParamsFromBody(providerData.bodyTemplate, request.body, allParamValues);
+    }
     
-    urlParams.forEach(param => {
-        // Add to paramValues if not already present
-        if (providerData.paramValues && providerData.paramValues[param]) {
-            paramValues[param] = providerData.paramValues[param];
-        }
-    });
+    // 3. Extract params from response if available
+    if (request.responseText && providerData.responseMatches) {
+        extractParamsFromResponse(
+            request.responseText, 
+            providerData.responseMatches, 
+            providerData.responseRedactions || [],
+            allParamValues
+        );
+        
+        // Log the extracted response parameters
+        console.log('[CLAIM-CREATOR] Extracted parameters from response:', 
+            Object.keys(allParamValues).join(', '));
+    }
     
-    // Extract dynamic params from body
-    const bodyParams = extractDynamicParams(params.body);
+    // 4. Add any pre-defined parameter values from providerData
+    if (providerData.paramValues) {
+        Object.entries(providerData.paramValues).forEach(([key, value]) => {
+            // Only add if not already extracted from request/response
+            if (!(key in allParamValues)) {
+                allParamValues[key] = value;
+            }
+        });
+    }
     
-    bodyParams.forEach(param => {
-        // Add to paramValues if not already present
-        if (providerData.paramValues && providerData.paramValues[param]) {
-            paramValues[param] = providerData.paramValues[param];
-        }
-    });
+    // 5. Separate parameters into public and secret
+    const { publicParams, secretParams: secretParamValues } = separateParams(allParamValues);
+    
+    // Add parameter values to respective objects
+    if (Object.keys(publicParams).length > 0) {
+        params.paramValues = publicParams;
+    }
+    
+    if (Object.keys(secretParamValues).length > 0) {
+        secretParams.paramValues = secretParamValues;
+    }
     
     // Process response matches if available
     if (providerData.responseMatches) {
         params.responseMatches = providerData.responseMatches.map(match => {
-            // Extract dynamic params from response match value
-            const responseParams = extractDynamicParams(match.value);
-            responseParams.forEach(param => {
-                // For response params, add them to params not secretParams
-                if (providerData.paramValues && providerData.paramValues[param]) {
-                    paramValues[param] = providerData.paramValues[param];
-                }
-            });
+            // Create a clean object with only the required fields
+            const cleanMatch = {
+                value: match.value,
+                type: match.type || 'contains',
+                invert: match.invert || false
+            };
             
-            return match;
+            return cleanMatch;
         });
     }
     
@@ -165,14 +175,15 @@ export const createClaimObject = (request, providerData) => {
         });
     }
     
-    // Add paramValues to params if any were found
-    if (Object.keys(paramValues).length > 0) {
-        params.paramValues = paramValues;
+    // Add any additional client options if available
+    if (providerData.additionalClientOptions) {
+        params.additionalClientOptions = providerData.additionalClientOptions;
     }
     
     // Create the final claim object
     const claimObject = {
         name: 'http',
+        sessionId: sessionId,
         params,
         secretParams,
         ownerPrivateKey: `0x1234567456789012345678901234567890123456789012345678901234567890`,

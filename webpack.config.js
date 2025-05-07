@@ -69,6 +69,7 @@ var options = {
     clean: true,
     publicPath: ASSET_PATH,
     assetModuleFilename: '[name][ext]',
+    chunkFilename: "[name].bundle.js",
   },
   module: {
     rules: [
@@ -151,6 +152,8 @@ var options = {
   // Enable WebAssembly
   experiments: {
     asyncWebAssembly: true,
+    syncWebAssembly: true,
+    topLevelAwait: true,
   },
   resolve: {
     alias: {
@@ -159,7 +162,7 @@ var options = {
       'koffi': false,
       're2': false,
       'worker_threads': path.resolve(__dirname, 'src/utils/mocks/worker-threads-mock.js'),
-      'snarkjs': false,
+      'snarkjs': path.resolve(__dirname, 'src/utils/mocks/snarkjs-mock.js'),
       'node:url': require.resolve('url/'),
       'react-native-tcp-socket': false,
       // Use process/browser.js instead of process/browser
@@ -281,6 +284,20 @@ if (env.NODE_ENV === "development") {
         extractComments: false,
       }),
     ],
+    splitChunks: {
+      chunks: 'all',
+      cacheGroups: {
+        vendors: {
+          test: /[\\/]node_modules[\\/]/,
+          name(module) {
+            // Get the name of the npm package
+            const packageName = module.context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)[1];
+            // Return a valid filename
+            return `vendor-${packageName.replace('@', '')}`;
+          },
+        },
+      },
+    },
   };
 }
 

@@ -3,7 +3,7 @@ import '../utils/polyfills';
 
 // Import necessary utilities and libraries
 import { filterRequest } from '../utils/claim-creator';
-import { fetchProviderData, updateSessionStatus } from '../utils/fetch-calls';
+import { fetchProviderData, updateSessionStatus, submitProofOnCallback } from '../utils/fetch-calls';
 import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/constants';
 import { generateProof } from '../utils/proof-generator';
 import { testPolyfills } from '../utils/polyfill-test';
@@ -17,6 +17,8 @@ class ReclaimExtensionManager {
         this.disableNetworkMonitoring();
         this.providerData = null;
         this.parameters = null;
+        this.sessionId = null;
+        this.callbackUrl = null;
         
         // Create maps to store request data
         this.requestHeadersMap = new Map();
@@ -127,6 +129,16 @@ class ReclaimExtensionManager {
             this.providerData = providerData;
             if (templateData.parameters) {
                 this.parameters = templateData.parameters;
+            }
+
+            if(templateData.callbackUrl)
+            {
+                this.callbackUrl = templateData.callbackUrl;
+            }
+
+            if(templateData.sessionId)
+            {
+                this.sessionId = templateData.sessionId;
             }
 
             console.log('[BACKGROUND] Provider data:', providerData);
@@ -522,7 +534,7 @@ class ReclaimExtensionManager {
                 // Generate and submit proof when we find a matching request
                 try {
                     // Create claim object from the request and providerData
-                    const claimData = createClaimObject(formattedRequest, matchingCriteria);
+                    const claimData = createClaimObject(formattedRequest, matchingCriteria, this.sessionId);
                     
                     // Clean up the map entries for this request
                     this.requestHeadersMap.delete(requestId);
@@ -588,18 +600,9 @@ class ReclaimExtensionManager {
             if (!this.providerData) {
                 throw new Error('Provider data not available');
             }
-            
-            // TODO: Replace with actual backend endpoint when available
-            // const response = await fetch(`https://api.reclaimprotocol.org/session/${sessionId}/proof`, {
-            //     method: 'POST',
-            //     headers: {
-            //         'Content-Type': 'application/json'
-            //     },
-            //     body: JSON.stringify({ proof })
-            // });
-            
-            // For development, log that we would submit the proof
-            console.log('[BACKGROUND] Proof would be submitted to backend');
+
+            await submitProofOnCallback(proof, this.callbackUrl, this.sessionId);
+            console.log('[BACKGROUND] Proof submitted to callback URL:', this.callbackUrl);
             
             // Notify content script
             if (this.activeTabId) {
