@@ -162,7 +162,6 @@ var options = {
       'koffi': false,
       're2': false,
       'worker_threads': path.resolve(__dirname, 'src/utils/mocks/worker-threads-mock.js'),
-      'snarkjs': path.resolve(__dirname, 'src/utils/mocks/snarkjs-mock.js'),
       'node:url': require.resolve('url/'),
       'react-native-tcp-socket': false,
       // Use process/browser.js instead of process/browser
@@ -250,7 +249,12 @@ var options = {
           from: "src/assets/img/logo.png",
           to: path.join(__dirname, "build", "assets", "img"),
           force: true,
-        }
+        },
+        {
+          from: "public", // Copy from the 'public' directory
+          to: path.join(__dirname, "build"), // To the root of the 'build' directory
+          force: true,
+        },
       ],
     }),
     // Use HtmlWebpackPlugin for the offscreen document to ensure proper bundling

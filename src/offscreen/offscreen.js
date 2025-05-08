@@ -100,6 +100,33 @@ class OffscreenProofGenerator {
         sendResponse({ received: true });
         break;
 
+      case MESSAGER_ACTIONS.GET_PRIVATE_KEY:
+        try {
+          const randomBytes = window.crypto.getRandomValues(new Uint8Array(32));
+          const privateKey = '0x' + Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+          
+          chrome.runtime.sendMessage({
+            action: MESSAGER_ACTIONS.GET_PRIVATE_KEY_RESPONSE,
+            source: MESSAGER_TYPES.OFFSCREEN,
+            target: source, // Send back to the original requester
+            success: true,
+            privateKey: privateKey
+          });
+          sendResponse({ success: true, received: true }); // Acknowledge message handling
+        } catch (error) {
+          console.error('[OFFSCREEN] Error generating private key:', error);
+          // Send error response back to caller
+          chrome.runtime.sendMessage({
+            action: MESSAGER_ACTIONS.GET_PRIVATE_KEY_RESPONSE,
+            source: MESSAGER_TYPES.OFFSCREEN,
+            target: source,
+            success: false,
+            error: error.message || 'Unknown error generating private key'
+          });
+          sendResponse({ success: false, error: error.message }); // Acknowledge with error
+        }
+        break; // Important to break here
+
       default:
         console.log('[OFFSCREEN] Unknown action:', action);
         sendResponse({ success: false, error: 'Unknown action' });

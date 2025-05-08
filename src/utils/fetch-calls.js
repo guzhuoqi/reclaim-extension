@@ -33,14 +33,19 @@ export const updateSessionStatus = async (sessionId, status) => {
 }
 
 
-export const submitProofOnCallback = async (proof, submitUrl, sessionId) => {
+export const submitProofOnCallback = async (proofs, submitUrl, sessionId) => {
     try {
+        // 1. Convert the proofs array to a JSON string
+        const jsonStringOfProofs = JSON.stringify(proofs);
+        // 2. URL-encode the JSON string
+        const urlEncodedProofs = encodeURIComponent(jsonStringOfProofs);
+        // 3. Append the URL-encoded string to the submit URL
         const response = await fetch(submitUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ proof })
+            headers: { 'Content-Type': 'text/plain' },
+            body: urlEncodedProofs, // Send the URL-encoded string as the raw body
         });
-        const res = await response.json();
+        const res = await response.text();
         // check if response is valid
         if (!response.ok) {
             await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_SUBMISSION_FAILED);

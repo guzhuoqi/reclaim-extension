@@ -5,7 +5,7 @@ import '../utils/polyfills';
 import { filterRequest } from '../utils/claim-creator';
 import { fetchProviderData, updateSessionStatus, submitProofOnCallback } from '../utils/fetch-calls';
 import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/constants';
-import { generateProof } from '../utils/proof-generator';
+import { generateProof, formatProof } from '../utils/proof-generator';
 import { testPolyfills } from '../utils/polyfill-test';
 import { createClaimObject } from '../utils/claim-creator';
 import { replayRequest } from '../utils/claim-creator';
@@ -19,6 +19,7 @@ class ReclaimExtensionManager {
         this.parameters = null;
         this.sessionId = null;
         this.callbackUrl = null;
+        this.originalTabId = null;
         
         // Create maps to store request data
         this.requestHeadersMap = new Map();
@@ -66,6 +67,11 @@ class ReclaimExtensionManager {
                 case MESSAGER_ACTIONS.START_VERIFICATION:
                     if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
                         console.log('[BACKGROUND] Starting verification with data:', data);
+                        // Store the original tab ID
+                        if (sender.tab && sender.tab.id) {
+                            this.originalTabId = sender.tab.id;
+                            console.log('[BACKGROUND] Original tab ID stored:', this.originalTabId);
+                        }
                         const result = await this.startVerification(data);
                         sendResponse({ success: true, result });
                         break;
@@ -594,16 +600,14 @@ class ReclaimExtensionManager {
 
     async submitProof(proof) {
         try {
-            console.log('[BACKGROUND] Submitting proof:', proof);
-            
             // We need the current session data
             if (!this.providerData) {
                 throw new Error('Provider data not available');
             }
 
-            await submitProofOnCallback(proof, this.callbackUrl, this.sessionId);
+            const formattedProof = formatProof(proof, this.providerData);
+            await submitProofOnCallback([formattedProof], this.callbackUrl, this.sessionId);
             console.log('[BACKGROUND] Proof submitted to callback URL:', this.callbackUrl);
-            
             // Notify content script
             if (this.activeTabId) {
                 try {
@@ -614,6 +618,22 @@ class ReclaimExtensionManager {
                     console.log('[BACKGROUND] Content script notified of proof submission');
                 } catch (error) {
                     console.error('[BACKGROUND] Error notifying content script:', error);
+                }
+            }
+
+            // Navigate back to the original tab and close the provider tab
+            if (this.originalTabId) {
+                try {
+                    await chrome.tabs.update(this.originalTabId, { active: true });
+                    console.log('[BACKGROUND] Switched back to original tab:', this.originalTabId);
+                    if (this.activeTabId) {
+                        await chrome.tabs.remove(this.activeTabId);
+                        console.log('[BACKGROUND] Closed provider tab:', this.activeTabId);
+                        this.activeTabId = null;
+                    }
+                    this.originalTabId = null; // Reset original tab ID
+                } catch (error) {
+                    console.error('[BACKGROUND] Error navigating back or closing tab:', error);
                 }
             }
             

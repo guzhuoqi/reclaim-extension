@@ -186,7 +186,7 @@ export const createClaimObject = (request, providerData, sessionId) => {
         sessionId: sessionId,
         params,
         secretParams,
-        ownerPrivateKey: `0x1234567456789012345678901234567890123456789012345678901234567890`,
+        ownerPrivateKey: '0x1234567456789012345678901234567890123456789012345678901234567890',
         client: {
             url: 'wss://attestor.reclaimprotocol.org/ws'
         }

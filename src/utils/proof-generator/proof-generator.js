@@ -117,7 +117,7 @@ export const generateProof = async (claimData) => {
 };
 
 // Function to ensure the offscreen document exists and is ready
-async function ensureOffscreenDocument() {
+export async function ensureOffscreenDocument() {
   // Use a shared promise to prevent multiple creation attempts
   if (offscreenReady) return true;
   
