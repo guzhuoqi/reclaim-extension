@@ -40,6 +40,10 @@
     {
       "resources": ["offscreen/offscreen.html", "offscreen/offscreen.bundle.js"],
       "matches": ["<all_urls>"]
+    },
+    {
+      "resources": ["assets/icons/humanity_protocol_logo.svg", "assets/img/logo.png"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

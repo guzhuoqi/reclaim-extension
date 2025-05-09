@@ -25,6 +25,7 @@ class ReclaimExtensionManager {
         this.requestHeadersMap = new Map();
         this.requestBodyMap = new Map();
         this.pendingRequests = new Map();
+        this.pendingPopupMessages = new Map(); // Added for queuing popup messages
         
         // Set to track processed requests to avoid duplicates
         this.processedRequests = new Set();
@@ -47,14 +48,30 @@ class ReclaimExtensionManager {
     async handleMessage(message, sender, sendResponse) {
 
         const { action, source, target, data } = message;
-        console.log('[BACKGROUND] Received message from', source, 'to', target, 'with action', action);
+        console.log('[BACKGROUND] Received message from', source, 'to', target, 'with action', action, 'for tab', sender.tab?.id);
 
         try {
             switch (action) {
                 // Handle content script loaded message
                 case MESSAGER_ACTIONS.CONTENT_SCRIPT_LOADED:
                     if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
-                        console.log('[BACKGROUND] Content script loaded', data.url);
+                        console.log(`[BACKGROUND] Content script loaded in tab ${sender.tab?.id} for URL: ${data.url}`);
+                        
+                        // Check if there's a pending popup message for this tab
+                        if (sender.tab?.id && this.pendingPopupMessages.has(sender.tab.id)) {
+                            const pendingMessage = this.pendingPopupMessages.get(sender.tab.id);
+                            console.log(`[BACKGROUND] Found pending popup message for tab ${sender.tab.id}. Sending now.`);
+                            chrome.tabs.sendMessage(sender.tab.id, pendingMessage.message)
+                                .then(response => {
+                                    if (chrome.runtime.lastError) {
+                                        console.error(`[BACKGROUND] Error sending (pending) SHOW_PROVIDER_VERIFICATION_POPUP to tab ${sender.tab.id}:`, chrome.runtime.lastError.message);
+                                    } else {
+                                        console.log(`[BACKGROUND] (Pending) SHOW_PROVIDER_VERIFICATION_POPUP message acknowledged by content script for tab ${sender.tab.id}:`, response);
+                                    }
+                                })
+                                .catch(error => console.error(`[BACKGROUND] Error sending (pending) SHOW_PROVIDER_VERIFICATION_POPUP to tab ${sender.tab.id} (promise catch):`, error));
+                            this.pendingPopupMessages.delete(sender.tab.id); // Remove after attempting to send
+                        }
                         sendResponse({ success: true });
                         break;
                     } else {
@@ -104,6 +121,28 @@ class ReclaimExtensionManager {
                         sendResponse({ success: false, error: 'Action not supported' });
                     }
                     break;
+
+                case MESSAGER_ACTIONS.CLOSE_CURRENT_TAB:
+                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                        if (sender.tab && sender.tab.id) {
+                            chrome.tabs.remove(sender.tab.id, () => {
+                                if (chrome.runtime.lastError) {
+                                    console.error('[BACKGROUND] Error closing tab:', chrome.runtime.lastError.message);
+                                    sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                                } else {
+                                    console.log('[BACKGROUND] Tab closed successfully:', sender.tab.id);
+                                    sendResponse({ success: true });
+                                }
+                            });
+                        } else {
+                            console.error('[BACKGROUND] CLOSE_CURRENT_TAB: No tab ID provided by sender.');
+                            sendResponse({ success: false, error: 'No tab ID found to close.' });
+                        }
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    return true;
 
                 default:
                     console.log('[BACKGROUND] Message received but not processed:', action);
@@ -161,6 +200,31 @@ class ReclaimExtensionManager {
             chrome.tabs.create({ url: providerUrl }, (tab) => {
                 console.log('[BACKGROUND] New tab created with ID:', tab.id);
                 this.activeTabId = tab.id;
+                
+                const providerName = this.providerData?.name || 'Default Provider';
+                const credentialType = this.providerData?.verificationConfig?.credentialType || 'Default Credential';
+                const dataRequired = this.providerData?.verificationConfig?.dataRequired || 'Default Data';
+                const loginConfirmSelector = this.providerData?.verificationConfig?.loginConfirmSelector || '#emirates-logout-button';
+
+                if (tab.id) {
+                    const popupMessage = {
+                        action: MESSAGER_ACTIONS.SHOW_PROVIDER_VERIFICATION_POPUP,
+                        source: MESSAGER_TYPES.BACKGROUND,
+                        target: MESSAGER_TYPES.CONTENT_SCRIPT,
+                        data: {
+                            providerName,
+                            credentialType,
+                            dataRequired,
+                            loginConfirmSelector
+                        }
+                    };
+                    // Queue the message instead of sending directly
+                    this.pendingPopupMessages.set(tab.id, { message: popupMessage });
+                    console.log(`[BACKGROUND] Queued SHOW_PROVIDER_VERIFICATION_POPUP for tab ${tab.id}. Waiting for content script to load.`);
+
+                } else {
+                  console.error("[BACKGROUND] New tab does not have an ID, cannot queue message for popup.");
+                }
                 
                 // Update session status after tab creation
                 updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION)
