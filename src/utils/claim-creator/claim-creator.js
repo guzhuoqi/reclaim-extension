@@ -5,9 +5,71 @@ import {
     extractParamsFromResponse,
     separateParams
 } from './params-extractor';
+import { MESSAGER_ACTIONS, MESSAGER_TYPES } from '../constants';
+import { ensureOffscreenDocument } from '../offscreen-manager';
 
-export const createClaimObject = (request, providerData, sessionId) => {
+const getPrivateKeyFromOffscreen = () => {
+    return new Promise((resolve, reject) => {
+        // Timeout after 10 seconds
+        const callTimeout = setTimeout(() => {
+            chrome.runtime.onMessage.removeListener(messageListener);
+            reject(new Error('Timeout: No response from offscreen document for private key request.'));
+        }, 10000);
+
+        const messageListener = (message, sender) => {
+            // Ensure the message is from the offscreen document and is the expected response
+            if (message.action === MESSAGER_ACTIONS.GET_PRIVATE_KEY_RESPONSE &&
+                message.source === MESSAGER_TYPES.OFFSCREEN &&
+                message.target === MESSAGER_TYPES.BACKGROUND) { // Assuming this script runs in background context
+
+                clearTimeout(callTimeout);
+                chrome.runtime.onMessage.removeListener(messageListener);
+
+                if (message.success && message.privateKey) {
+                    console.log('[CLAIM-CREATOR] Received private key from offscreen document');
+                    resolve(message.privateKey);
+                } else {
+                    console.error('[CLAIM-CREATOR] Failed to get private key from offscreen:', message.error);
+                    reject(new Error(message.error || 'Unknown error getting private key from offscreen document.'));
+                }
+                return false; // Indicate message has been handled
+            }
+            return true; // Keep listener active for other messages
+        };
+
+        chrome.runtime.onMessage.addListener(messageListener);
+
+        console.log('[CLAIM-CREATOR] Requesting private key from offscreen document');
+        chrome.runtime.sendMessage({
+            action: MESSAGER_ACTIONS.GET_PRIVATE_KEY,
+            source: MESSAGER_TYPES.BACKGROUND, // Assuming this script runs in background context
+            target: MESSAGER_TYPES.OFFSCREEN
+        }, response => {
+            if (chrome.runtime.lastError) {
+                clearTimeout(callTimeout);
+                chrome.runtime.onMessage.removeListener(messageListener);
+                console.error('[CLAIM-CREATOR] Error sending GET_PRIVATE_KEY message:', chrome.runtime.lastError.message);
+                reject(new Error(`Error sending message to offscreen document: ${chrome.runtime.lastError.message}`));
+            }
+            // If offscreen.js calls sendResponse synchronously, it can be handled here
+            // but the main logic relies on the async messageListener
+        });
+    });
+};
+
+export const createClaimObject = async (request, providerData, sessionId) => {
     console.log('[CLAIM-CREATOR] Creating claim object from request data');
+    
+    // Ensure offscreen document is ready
+    try {
+        console.log('[CLAIM-CREATOR] Ensuring offscreen document is ready...');
+        await ensureOffscreenDocument();
+        console.log('[CLAIM-CREATOR] Offscreen document is ready.');
+    } catch (error) {
+        console.error('[CLAIM-CREATOR] Failed to ensure offscreen document:', error);
+        // Depending on requirements, you might want to throw error or handle differently
+        throw new Error(`Failed to initialize offscreen document: ${error.message}`);
+    }
     
     // Define public headers that should be in params
     const PUBLIC_HEADERS = [
@@ -179,6 +241,16 @@ export const createClaimObject = (request, providerData, sessionId) => {
     if (providerData.additionalClientOptions) {
         params.additionalClientOptions = providerData.additionalClientOptions;
     }
+
+    let ownerPrivateKey;
+    try {
+        ownerPrivateKey = await getPrivateKeyFromOffscreen();
+    } catch (error) {
+        console.error('[CLAIM-CREATOR] Could not obtain private key:', error);
+        // Fallback or re-throw, depending on how critical the key is.
+        // For now, let's re-throw to make the failure visible.
+        throw new Error(`Could not obtain owner private key: ${error.message}`);
+    }
     
     // Create the final claim object
     const claimObject = {
@@ -186,7 +258,7 @@ export const createClaimObject = (request, providerData, sessionId) => {
         sessionId: sessionId,
         params,
         secretParams,
-        ownerPrivateKey: '0x1234567456789012345678901234567890123456789012345678901234567890',
+        ownerPrivateKey: ownerPrivateKey,
         client: {
             url: 'wss://attestor.reclaimprotocol.org/ws'
         }
