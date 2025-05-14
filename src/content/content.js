@@ -9,11 +9,61 @@ import { checkLoginStatus } from '../utils/login-monitor';
 
 class ReclaimContentScript {
     constructor() {
+      this.injectNetworkInterceptor();
       this.init();
       this.verificationPopup = null;
       this.providerName = 'Emirates';
       this.credentialType = 'Skywards';
       this.dataRequired = 'Membership Status / Tier';
+    }
+
+    injectNetworkInterceptor() {
+      try {
+        console.log('[CONTENT] Injecting network interceptor at document_start');
+        
+        // Create the script element
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('interceptor/network-interceptor.bundle.js');
+        script.type = 'text/javascript';
+        
+        // Add load and error handlers
+        script.onload = () => {
+          console.log('[CONTENT] Network interceptor loaded successfully');
+        };
+        
+        script.onerror = (error) => {
+          console.error('[CONTENT] Error loading network interceptor:', error);
+        };
+        
+        // High priority: We need this to happen as early as possible
+        const injectNow = () => {
+          // Use parentNode.insertBefore instead of appendChild for higher priority
+          if (document.documentElement) {
+            document.documentElement.insertBefore(script, document.documentElement.firstChild);
+            console.log('[CONTENT] Network interceptor script injected into documentElement');
+          } else {
+            console.warn('[CONTENT] documentElement not available yet, using appendChild');
+            (document.head || document.documentElement || document).appendChild(script);
+          }
+        };
+    
+        // Try to inject immediately
+        injectNow();
+        
+        // Also set up a MutationObserver as a fallback to ensure the script gets injected
+        // even if the DOM structure isn't ready
+        if (!document.head && !document.documentElement) {
+          const observer = new MutationObserver(() => {
+            if (document.documentElement) {
+              observer.disconnect();
+              injectNow();
+            }
+          });
+          observer.observe(document, { childList: true, subtree: true });
+        }
+      } catch (e) {
+        console.error('[CONTENT] Error in injectNetworkInterceptor:', e);
+      }
     }
     
     init() {

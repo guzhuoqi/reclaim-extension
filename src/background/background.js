@@ -20,29 +20,27 @@ class ReclaimExtensionManager {
         this.sessionId = null;
         this.callbackUrl = null;
         this.originalTabId = null;
-        
+
         // Create maps to store request data
         this.requestHeadersMap = new Map();
         this.requestBodyMap = new Map();
-        this.pendingRequests = new Map();
-        this.pendingPopupMessages = new Map(); // Added for queuing popup messages
-        
+        this.initPopupMessage = new Map();
+
         // Set to track processed requests to avoid duplicates
         this.processedRequests = new Set();
-        
+
         // Initialize extension
         this.init();
     }
 
     async init() {
         // Test polyfills
-        const polyfillTestResults = testPolyfills();
-        console.log('Polyfill test results:', polyfillTestResults);
+        // const polyfillTestResults = testPolyfills();
+        // console.log('Polyfill test results:', polyfillTestResults);
 
         // Register message handler
         chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-        
-        console.log('Reclaim Extension initialized');
+
     }
 
     async handleMessage(message, sender, sendResponse) {
@@ -56,10 +54,10 @@ class ReclaimExtensionManager {
                 case MESSAGER_ACTIONS.CONTENT_SCRIPT_LOADED:
                     if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
                         console.log(`[BACKGROUND] Content script loaded in tab ${sender.tab?.id} for URL: ${data.url}`);
-                        
+
                         // Check if there's a pending popup message for this tab
-                        if (sender.tab?.id && this.pendingPopupMessages.has(sender.tab.id)) {
-                            const pendingMessage = this.pendingPopupMessages.get(sender.tab.id);
+                        if (sender.tab?.id && this.initPopupMessage.has(sender.tab.id)) {
+                            const pendingMessage = this.initPopupMessage.get(sender.tab.id);
                             console.log(`[BACKGROUND] Found pending popup message for tab ${sender.tab.id}. Sending now.`);
                             chrome.tabs.sendMessage(sender.tab.id, pendingMessage.message)
                                 .then(response => {
@@ -70,7 +68,7 @@ class ReclaimExtensionManager {
                                     }
                                 })
                                 .catch(error => console.error(`[BACKGROUND] Error sending (pending) SHOW_PROVIDER_VERIFICATION_POPUP to tab ${sender.tab.id} (promise catch):`, error));
-                            this.pendingPopupMessages.delete(sender.tab.id); // Remove after attempting to send
+                            this.initPopupMessage.delete(sender.tab.id); // Remove after attempting to send
                         }
                         sendResponse({ success: true });
                         break;
@@ -97,7 +95,7 @@ class ReclaimExtensionManager {
                         sendResponse({ success: false, error: 'Action not supported' });
                     }
                     break;
-                    
+
                 // Handle offscreen document ready message
                 case MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY:
                     if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
@@ -176,13 +174,11 @@ class ReclaimExtensionManager {
                 this.parameters = templateData.parameters;
             }
 
-            if(templateData.callbackUrl)
-            {
+            if (templateData.callbackUrl) {
                 this.callbackUrl = templateData.callbackUrl;
             }
 
-            if(templateData.sessionId)
-            {
+            if (templateData.sessionId) {
                 this.sessionId = templateData.sessionId;
             }
 
@@ -195,12 +191,12 @@ class ReclaimExtensionManager {
             // Create a new tab with provider URL DIRECTLY - not through an async flow
             const providerUrl = providerData.loginUrl;
             console.log('[BACKGROUND] Creating new tab with URL:', providerUrl);
-            
+
             // Use chrome.tabs.create directly and handle the promise explicitly
             chrome.tabs.create({ url: providerUrl }, (tab) => {
                 console.log('[BACKGROUND] New tab created with ID:', tab.id);
                 this.activeTabId = tab.id;
-                
+
                 const providerName = this.providerData?.name || 'Default Provider';
                 const credentialType = this.providerData?.verificationConfig?.credentialType || 'Default Credential';
                 const dataRequired = this.providerData?.verificationConfig?.dataRequired || 'Default Data';
@@ -218,19 +214,19 @@ class ReclaimExtensionManager {
                             loginConfirmSelector
                         }
                     };
-                    // Queue the message instead of sending directly
-                    this.pendingPopupMessages.set(tab.id, { message: popupMessage });
+                    // Store the message in the init PopupMessage for the tab
+                    this.initPopupMessage.set(tab.id, popupMessage);
                     console.log(`[BACKGROUND] Queued SHOW_PROVIDER_VERIFICATION_POPUP for tab ${tab.id}. Waiting for content script to load.`);
 
                 } else {
-                  console.error("[BACKGROUND] New tab does not have an ID, cannot queue message for popup.");
+                    console.error("[BACKGROUND] New tab does not have an ID, cannot queue message for popup.");
                 }
-                
+
                 // Update session status after tab creation
                 updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION)
                     .then(() => {
                         console.log('[BACKGROUND] Session status updated');
-                        
+
                         // Start network monitoring after tab creation
                         console.log('[BACKGROUND] Starting network monitoring');
                         this.enableNetworkMonitoring();
@@ -239,9 +235,10 @@ class ReclaimExtensionManager {
                         console.error('[BACKGROUND] Error updating session status:', error);
                     });
             });
-            
-            return { 
-                success: true, 
+
+
+            return {
+                success: true,
                 message: 'Verification started, redirecting to provider login page'
             };
         } catch (error) {
@@ -256,33 +253,33 @@ class ReclaimExtensionManager {
         try {
             // Reset the processed requests set
             this.processedRequests = new Set();
-            
+
             // Store bound methods to allow proper removal later
             this.boundHandleNetworkRequest = this.handleNetworkRequest.bind(this);
             this.boundHandleRequestHeaders = this.handleRequestHeaders.bind(this);
             this.boundHandleBeforeSendHeaders = this.handleBeforeSendHeaders.bind(this);
-            
+
             // Listen for request bodies
             chrome.webRequest.onBeforeRequest.addListener(
                 this.boundHandleNetworkRequest,
                 { urls: ["<all_urls>"] },
                 ["requestBody"]
             );
-    
+
             // Listen for request headers before they're sent
             chrome.webRequest.onBeforeSendHeaders.addListener(
                 this.boundHandleBeforeSendHeaders,
                 { urls: ["<all_urls>"] },
                 ["requestHeaders"]
             );
-            
+
             // Listen for request headers after they're sent (includes additional headers)
             chrome.webRequest.onSendHeaders.addListener(
                 this.boundHandleRequestHeaders,
                 { urls: ["<all_urls>"] },
                 ["requestHeaders"]
             );
-    
+
             this.isNetworkListenerActive = true;
             console.log('[BACKGROUND] Network monitoring enabled');
         } catch (error) {
@@ -299,69 +296,68 @@ class ReclaimExtensionManager {
             chrome.webRequest.onSendHeaders.removeListener(this.boundHandleRequestHeaders);
             this.isNetworkListenerActive = false;
             console.log('Network monitoring disabled');
-            
+
             // Clear request maps
             this.requestHeadersMap.clear();
             this.requestBodyMap.clear();
-            this.pendingRequests.clear();
         } catch (error) {
             console.error('[BACKGROUND] Error disabling network monitoring:', error);
         }
     }
-    
+
     // Generate a unique request ID to correlate different parts of the same request
     generateRequestId(details) {
         // Include requestId, url and timestamp to ensure uniqueness
         return `${details.requestId}_${details.url}_${Date.now()}`;
     }
-    
+
     // Extract cookie string from request headers
     extractCookieStr(requestHeaders) {
         if (!requestHeaders) return null;
-        
+
         // Try to find the Cookie header
-        const cookieHeader = requestHeaders.find(header => 
+        const cookieHeader = requestHeaders.find(header =>
             header.name.toLowerCase() === 'cookie'
         );
-        
+
         if (cookieHeader) {
             return cookieHeader.value;
         }
-        
+
         // If no cookie header found in request headers, try to get from chrome.cookies API
         // Note: This requires the "cookies" permission in manifest.json
         return null;
     }
-    
+
     // Additional method to get cookies for a URL using chrome.cookies API
     async getCookiesForUrl(url) {
         try {
             if (!chrome.cookies || !chrome.cookies.getAll) {
                 return null;
             }
-            
+
             const urlObj = new URL(url);
             const domain = urlObj.hostname;
-            
+
             const cookies = await chrome.cookies.getAll({ domain });
             if (cookies && cookies.length > 0) {
                 const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
                 return cookieStr;
             }
-            
+
             return null;
         } catch (error) {
             console.error('[BACKGROUND] Error getting cookies for URL:', error);
             return null;
         }
     }
-    
+
     // Handle before send headers event to capture headers early
     handleBeforeSendHeaders(details) {
         try {
-            
+
             const requestId = details.requestId;
-            
+
             // Convert headers array to object for easier use
             const headersObject = {};
             if (details.requestHeaders) {
@@ -369,10 +365,10 @@ class ReclaimExtensionManager {
                     headersObject[header.name] = header.value;
                 });
             }
-            
+
             // Extract cookie string
             const cookieStr = this.extractCookieStr(details.requestHeaders);
-            
+
             // Store headers with the request ID
             this.requestHeadersMap.set(requestId, {
                 timestamp: Date.now(),
@@ -380,10 +376,10 @@ class ReclaimExtensionManager {
                 headers: headersObject,
                 cookieStr: cookieStr
             });
-            
+
             // Clean up old entries from requestHeadersMap
             this.cleanupRequestMaps();
-            
+
             // Check if we already have the body for this request
             if (this.requestBodyMap.has(requestId)) {
                 this.processCompleteRequest(requestId);
@@ -392,17 +388,17 @@ class ReclaimExtensionManager {
             console.error('[BACKGROUND] Error in handleBeforeSendHeaders:', error);
         }
     }
-    
+
     // Handle send headers event - this happens after the request is sent
     handleRequestHeaders(details) {
         try {
-            
+
             const requestId = details.requestId;
-            
+
             // Update the headers if we already have them from before send
             if (this.requestHeadersMap.has(requestId)) {
                 const existingData = this.requestHeadersMap.get(requestId);
-                
+
                 // Convert the headers array to an object
                 const headersObject = {};
                 if (details.requestHeaders) {
@@ -410,15 +406,15 @@ class ReclaimExtensionManager {
                         headersObject[header.name] = header.value;
                     });
                 }
-                
+
                 // Extract cookie string
                 const cookieStr = this.extractCookieStr(details.requestHeaders) || existingData.cookieStr;
-                
+
                 // Update with potentially more complete headers
                 existingData.headers = headersObject;
                 existingData.cookieStr = cookieStr;
                 this.requestHeadersMap.set(requestId, existingData);
-                
+
                 // Check if we have the body for this request
                 if (this.requestBodyMap.has(requestId)) {
                     this.processCompleteRequest(requestId);
@@ -431,17 +427,17 @@ class ReclaimExtensionManager {
                         headersObject[header.name] = header.value;
                     });
                 }
-                
+
                 // Extract cookie string
                 const cookieStr = this.extractCookieStr(details.requestHeaders);
-                
+
                 this.requestHeadersMap.set(requestId, {
                     timestamp: Date.now(),
                     url: details.url,
                     headers: headersObject,
                     cookieStr: cookieStr
                 });
-                
+
                 // Check if we have the body for this request
                 if (this.requestBodyMap.has(requestId)) {
                     this.processCompleteRequest(requestId);
@@ -451,14 +447,14 @@ class ReclaimExtensionManager {
             console.error('[BACKGROUND] Error handling request headers:', error);
         }
     }
-    
+
     // Handle request body
     async handleNetworkRequest(details) {
         try {
-            
+
             const requestId = details.requestId;
             let body = null;
-            
+
             // Extract and format request body if available
             if (details.requestBody) {
                 if (details.requestBody.raw) {
@@ -475,7 +471,7 @@ class ReclaimExtensionManager {
                     body = JSON.stringify(details.requestBody.formData);
                 }
             }
-            
+
             // Store the body information
             this.requestBodyMap.set(requestId, {
                 timestamp: Date.now(),
@@ -483,10 +479,10 @@ class ReclaimExtensionManager {
                 method: details.method || 'GET',
                 body
             });
-            
+
             // Clean up old entries
             this.cleanupRequestMaps();
-            
+
             // Check if we already have headers for this request
             if (this.requestHeadersMap.has(requestId)) {
                 await this.processCompleteRequest(requestId);
@@ -495,7 +491,7 @@ class ReclaimExtensionManager {
             console.error('[BACKGROUND] Error handling network request:', error);
         }
     }
-    
+
     // Process the complete request when we have both headers and body
     async processCompleteRequest(requestId) {
         try {
@@ -504,28 +500,28 @@ class ReclaimExtensionManager {
             if (!this.isNetworkListenerActive) {
                 return;
             }
-            
+
             // If we've already processed this request, skip it
             if (this.processedRequests.has(requestId)) {
                 return;
             }
-            
+
             const headerInfo = this.requestHeadersMap.get(requestId);
             const bodyInfo = this.requestBodyMap.get(requestId);
-            
+
             if (!headerInfo || !bodyInfo) {
                 return; // Still missing part of the request
             }
-            
+
             // Mark this request as processed
             this.processedRequests.add(requestId);
-            
+
             // Try to get cookies using chrome.cookies API if they weren't found in headers
             let cookieStr = headerInfo.cookieStr;
             if (!cookieStr) {
                 cookieStr = await this.getCookiesForUrl(bodyInfo.url);
             }
-            
+
             // Create complete request object
             const formattedRequest = {
                 url: bodyInfo.url,
@@ -534,37 +530,37 @@ class ReclaimExtensionManager {
                 headers: headerInfo.headers || {},
                 cookieStr: cookieStr
             };
-            
+
             // Check if this request matches our criteria
-            const matchingCriteria = this.providerData.requestData.find(criteria => 
+            const matchingCriteria = this.providerData.requestData.find(criteria =>
                 filterRequest(formattedRequest, criteria, this.parameters)
             );
-            
+
             if (matchingCriteria) {
                 // IMMEDIATELY disable network monitoring to prevent further captures
                 // This must be done before the async replay to prevent race conditions
                 this.disableNetworkMonitoring();
-                
+
                 console.log('[BACKGROUND] ==========================================');
                 console.log('[BACKGROUND] MATCHING REQUEST FOUND');
                 console.log('[BACKGROUND] URL:', formattedRequest.url);
                 console.log('[BACKGROUND] Method:', formattedRequest.method);
-                
+
                 if (formattedRequest.cookieStr) {
                     console.log('[BACKGROUND] Cookie string present for the matching request with length:', formattedRequest.cookieStr.length);
                 } else {
                     console.log('[BACKGROUND] No cookie string found for the matching request!');
                 }
-                
+
                 // Only log body type and length for privacy
-                console.log('[BACKGROUND] Body:', 
-                    formattedRequest.body ? 
-                    `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` : 
-                    'No body for the matching request!');
-                
+                console.log('[BACKGROUND] Body:',
+                    formattedRequest.body ?
+                        `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` :
+                        'No body for the matching request!');
+
                 // Create a flag to prevent multiple replays for the same request
                 let replayCompleted = false;
-                
+
                 // Replay the request to get the response body
                 console.log('[BACKGROUND] Replaying request to get response body...');
                 try {
@@ -572,10 +568,10 @@ class ReclaimExtensionManager {
                         replayCompleted = true;
                         // Use a 1500ms delay for the initial request to avoid rate limiting
                         const responseResult = await replayRequest(formattedRequest, true, 1500);
-                        
+
                         // Add response body to the request object
                         formattedRequest.responseText = responseResult.responseText;
-                        
+
                         // Check if we got a rate limit or error response
                         if (responseResult.status >= 400) {
                             console.warn(`[BACKGROUND] Received error status: ${responseResult.status} - ${responseResult.statusText}`);
@@ -583,7 +579,7 @@ class ReclaimExtensionManager {
                                 console.warn('[BACKGROUND] Rate limiting detected in response text');
                             }
                         }
-                        
+
                         // Log response info
                         console.log('[BACKGROUND] Response successfully obtained:');
                         console.log('[BACKGROUND] - Status:', responseResult.status);
@@ -593,47 +589,47 @@ class ReclaimExtensionManager {
                     } else {
                         console.log('[BACKGROUND] Replay already completed, skipping duplicate replay');
                     }
-                    
+
                 } catch (replayError) {
                     console.error('[BACKGROUND] Failed to replay request:', replayError);
                     // We continue even if replay fails - some providers may not require the response body
                 }
-                
+
                 console.log('[BACKGROUND] ==========================================');
-                
+
                 // Generate and submit proof when we find a matching request
                 try {
                     // Create claim object from the request and providerData
                     const claimData = createClaimObject(formattedRequest, matchingCriteria, this.sessionId);
-                    
+
                     // Clean up the map entries for this request
                     this.requestHeadersMap.delete(requestId);
                     this.requestBodyMap.delete(requestId);
-                    
+
                     // Process the proof
                     await this.generateAndSubmitProof(claimData);
                 } catch (error) {
                     console.error('[BACKGROUND] Error processing matching request:', error);
                 }
             }
-            
+
         } catch (error) {
             console.error('[BACKGROUND] Error processing complete request:', error);
         }
     }
-    
+
     // Clean up old entries from request maps (older than 30 seconds)
     cleanupRequestMaps() {
         const now = Date.now();
         const timeout = 30000; // 30 seconds
-        
+
         // Clean up requestHeadersMap
         for (const [key, value] of this.requestHeadersMap.entries()) {
             if (now - value.timestamp > timeout) {
                 this.requestHeadersMap.delete(key);
             }
         }
-        
+
         // Clean up requestBodyMap
         for (const [key, value] of this.requestBodyMap.entries()) {
             if (now - value.timestamp > timeout) {
@@ -646,15 +642,15 @@ class ReclaimExtensionManager {
         try {
             // Use the proof-generator utility which leverages offscreen document
             console.log('[BACKGROUND] Generating proof for claim data:', claimData);
-                        
+
             // Generate proof using offscreen document
             const proof = await generateProof(claimData);
-            
+
             console.log('[BACKGROUND] Proof generated successfully:', proof);
-            
+
             // Submit the proof
-            await this.submitProof(proof);
-            
+            // await this.submitProof(proof);
+
             return proof;
         } catch (error) {
             console.error('[BACKGROUND] Error generating or submitting proof:', error);
@@ -700,7 +696,7 @@ class ReclaimExtensionManager {
                     console.error('[BACKGROUND] Error navigating back or closing tab:', error);
                 }
             }
-            
+
             return { success: true };
         } catch (error) {
             console.error('[BACKGROUND] Error submitting proof:', error);

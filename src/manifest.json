@@ -44,6 +44,10 @@
     {
       "resources": ["assets/icons/humanity_protocol_logo.svg", "assets/img/logo.png"],
       "matches": ["<all_urls>"]
+    },
+    {
+      "resources": ["interceptor/network-interceptor.js", "interceptor/network-interceptor.bundle.js"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

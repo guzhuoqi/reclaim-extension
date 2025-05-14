@@ -3,6 +3,10 @@ process.env.BABEL_ENV = 'production';
 process.env.NODE_ENV = 'production';
 process.env.ASSET_PATH = '/';
 
+console.log('Building for production...');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('BABEL_ENV:', process.env.BABEL_ENV);
+
 var webpack = require('webpack'),
   path = require('path'),
   fs = require('fs'),

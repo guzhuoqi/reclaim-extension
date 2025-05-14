@@ -61,7 +61,8 @@ var options = {
     popup: path.join(__dirname, "src", "popup", "popup.js"),
     "background/background": path.join(__dirname, "src", "background", "background.js"),
     "content/content": path.join(__dirname, "src", "content", "content.js"),
-    "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js")
+    "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js"),
+    "interceptor/network-interceptor": path.join(__dirname, "src", "interceptor", "network-interceptor.js")
   },
   output: {
     filename: "[name].bundle.js",
@@ -206,6 +207,10 @@ var options = {
     new webpack.ProgressPlugin(),
     // expose and write the allowed env vars on the compiled bundle
     new webpack.EnvironmentPlugin(["NODE_ENV"]),
+    new webpack.DefinePlugin({
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
+      'process.env.DEBUG': JSON.stringify(process.env.DEBUG || false)
+    }),
     // Add NodePolyfillPlugin to handle Node.js polyfills
     new NodePolyfillPlugin(),
     // Provide global Buffer and process
@@ -281,27 +286,20 @@ var options = {
 if (env.NODE_ENV === "development") {
   options.devtool = "cheap-module-source-map";
 } else {
+  options.devtool = "source-map";
   options.optimization = {
     minimize: true,
     minimizer: [
       new TerserPlugin({
         extractComments: false,
+        terserOptions: {
+          compress: {
+            drop_console: false
+          },
+        }
       }),
     ],
-    splitChunks: {
-      chunks: 'all',
-      cacheGroups: {
-        vendors: {
-          test: /[\\/]node_modules[\\/]/,
-          name(module) {
-            // Get the name of the npm package
-            const packageName = module.context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)[1];
-            // Return a valid filename
-            return `vendor-${packageName.replace('@', '')}`;
-          },
-        },
-      },
-    },
+    splitChunks: false,
   };
 }
 
