@@ -100,6 +100,43 @@ export function createProviderVerificationPopup(providerName, description, dataR
               font-weight: 500;
             }
             
+            .reclaim-steps-container {
+              margin-top: 20px;
+              padding-top: 15px;
+              border-top: 1px solid #3A3A3C;
+            }
+            
+            .reclaim-steps-title {
+              font-size: 14px;
+              font-weight: 600;
+              margin-bottom: 12px;
+            }
+            
+            .reclaim-step {
+              display: flex;
+              align-items: flex-start;
+              margin-bottom: 12px;
+            }
+            
+            .reclaim-step-number {
+              background-color: #0A84FF;
+              color: white;
+              border-radius: 50%;
+              width: 22px;
+              height: 22px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 12px;
+              margin-right: 10px;
+              flex-shrink: 0;
+            }
+            
+            .reclaim-step-text {
+              font-size: 14px;
+              line-height: 1.4;
+            }
+            
             .reclaim-status-container {
               margin-top: 15px;
               overflow: hidden;
@@ -177,6 +214,50 @@ export function createProviderVerificationPopup(providerName, description, dataR
             
             .reclaim-icon-circle.error {
               background-color: #FF453A;
+            }
+            
+            .reclaim-circular-loader {
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              margin: 20px 0;
+            }
+            
+            .reclaim-circular-loader svg {
+              width: 48px;
+              height: 48px;
+              animation: reclaim-rotate 2s linear infinite;
+            }
+            
+            .reclaim-circular-loader circle {
+              stroke: #0A84FF;
+              stroke-width: 4;
+              stroke-dasharray: 150, 200;
+              stroke-dashoffset: -10;
+              stroke-linecap: round;
+              fill: none;
+              animation: reclaim-dash 1.5s ease-in-out infinite;
+            }
+            
+            @keyframes reclaim-rotate {
+              100% {
+                transform: rotate(360deg);
+              }
+            }
+            
+            @keyframes reclaim-dash {
+              0% {
+                stroke-dasharray: 1, 200;
+                stroke-dashoffset: 0;
+              }
+              50% {
+                stroke-dasharray: 89, 200;
+                stroke-dashoffset: -35;
+              }
+              100% {
+                stroke-dasharray: 89, 200;
+                stroke-dashoffset: -124;
+              }
             }
             
             /* Animations */
@@ -262,7 +343,24 @@ export function createProviderVerificationPopup(providerName, description, dataR
                 <p class="reclaim-popup-value">${dataRequired}</p>
             </div>
 
+            <div id="reclaim-steps-container" class="reclaim-steps-container">
+                <p class="reclaim-steps-title">How it works</p>
+                <div class="reclaim-step">
+                    <div class="reclaim-step-number">1</div>
+                    <div class="reclaim-step-text">Log in to your ${providerName} account.</div>
+                </div>
+                <div class="reclaim-step">
+                    <div class="reclaim-step-number">2</div>
+                    <div class="reclaim-step-text">Navigate to the Dashboard</div>
+                </div>
+            </div>
+
             <div id="reclaim-status-container" class="reclaim-status-container" style="display: none; max-height: 0;">
+                <div id="reclaim-circular-loader" class="reclaim-circular-loader" style="display: none;">
+                    <svg viewBox="25 25 50 50">
+                        <circle cx="50" cy="50" r="20"></circle>
+                    </svg>
+                </div>
                 <div id="reclaim-status-progress" class="reclaim-status-progress" style="display: none;">
                     <div class="reclaim-progress-row">
                         <span id="reclaim-status-text" class="reclaim-status-text">Preparing verification...</span>
@@ -279,12 +377,21 @@ export function createProviderVerificationPopup(providerName, description, dataR
 
     // Function to show the loading state
     function showLoader(message = "Generating verification proof...") {
+        const stepsContainer = popup.querySelector('#reclaim-steps-container');
         const statusContainer = popup.querySelector('#reclaim-status-container');
+        const circularLoader = popup.querySelector('#reclaim-circular-loader');
         const progressContainer = popup.querySelector('#reclaim-status-progress');
         const statusText = popup.querySelector('#reclaim-status-text');
         
+        // Hide the steps
+        if (stepsContainer) {
+            stepsContainer.style.display = 'none';
+        }
+        
+        // Show the status container and circular loader
         statusContainer.style.display = 'block';
         statusContainer.style.maxHeight = '200px';
+        circularLoader.style.display = 'flex';
         progressContainer.style.display = 'block';
         statusText.textContent = message;
         
@@ -317,11 +424,22 @@ export function createProviderVerificationPopup(providerName, description, dataR
 
     // Function to show success state
     function showSuccess() {
+        const stepsContainer = popup.querySelector('#reclaim-steps-container');
         const statusContainer = popup.querySelector('#reclaim-status-container');
+        const circularLoader = popup.querySelector('#reclaim-circular-loader');
         const progressContainer = popup.querySelector('#reclaim-status-progress');
         const statusText = popup.querySelector('#reclaim-status-text');
         const progressBar = popup.querySelector('#reclaim-progress-bar');
         
+        // Hide the steps if they're still visible
+        if (stepsContainer) {
+            stepsContainer.style.display = 'none';
+        }
+        
+        // Hide circular loader
+        circularLoader.style.display = 'none';
+        
+        // Show success UI
         statusContainer.style.display = 'block';
         statusContainer.style.maxHeight = '200px';
         progressContainer.style.display = 'block';
@@ -350,11 +468,22 @@ export function createProviderVerificationPopup(providerName, description, dataR
 
     // Function to show error state
     function showError(errorMessage) {
+        const stepsContainer = popup.querySelector('#reclaim-steps-container');
         const statusContainer = popup.querySelector('#reclaim-status-container');
+        const circularLoader = popup.querySelector('#reclaim-circular-loader');
         const progressContainer = popup.querySelector('#reclaim-status-progress');
         const statusText = popup.querySelector('#reclaim-status-text');
         const progressBar = popup.querySelector('#reclaim-progress-bar');
         
+        // Hide the steps if they're still visible
+        if (stepsContainer) {
+            stepsContainer.style.display = 'none';
+        }
+        
+        // Hide circular loader
+        circularLoader.style.display = 'none';
+        
+        // Show error UI
         statusContainer.style.display = 'block';
         statusContainer.style.maxHeight = '200px';
         progressContainer.style.display = 'block';
