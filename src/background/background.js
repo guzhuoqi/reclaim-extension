@@ -59,7 +59,6 @@ class ReclaimExtensionManager {
                                     }
                                 })
                                 .catch(error => console.error(`[BACKGROUND] Error sending (pending) SHOW_PROVIDER_VERIFICATION_POPUP to tab ${sender.tab.id} (promise catch):`, error));
-                            this.initPopupMessage.delete(sender.tab.id); // Remove after attempting to send
                         }
 
                         // Check if there is a pending provider data Message for this tab
@@ -399,9 +398,8 @@ class ReclaimExtensionManager {
             const requestHash = criteria.requestHash;
             // Store the generated proof in case we need it later
             if (!this.generatedProofs.has(requestHash)) {
-                this.generatedProofs.set(requestHash, []);
+                this.generatedProofs.set(requestHash, proof);
             }
-            this.generatedProofs.get(requestHash).push(proof);
 
 
             // check if all the proofs are generated and then call submit proof
@@ -469,15 +467,17 @@ class ReclaimExtensionManager {
             const formattedProofs = [];
             // create an array of proofs
             // TODO: match the proofs to the request data
-
+            console.log('[BACKGROUND] Formating proofs for submission: ', this.generatedProofs);
             // the generatedProofs map is a map of requestHash to an array of proofs and the requestData is present in each of the requestData array element. Match the requestHash and call format proof
             for (const requestData of this.providerData.requestData) {
                 if (this.generatedProofs.has(requestData.requestHash)) {
-                    const proofs = this.generatedProofs.get(requestData.requestHash);
-                    const formattedProof = formatProof(proofs, requestData);
+                    const proof = this.generatedProofs.get(requestData.requestHash);
+                    const formattedProof = formatProof(proof, requestData);
                     formattedProofs.push(formattedProof);
                 }
             }
+
+            console.log('[BACKGROUND] Formated proofs for submission: ', formattedProofs);
             
             // submit the proofs
             try {
@@ -490,7 +490,7 @@ class ReclaimExtensionManager {
                     target: MESSAGE_SOURCES.CONTENT_SCRIPT,
                     data: { error: error.message }
                 });
-                console.error('[BACKGROUND] Error submitting proof:', error);
+                console.error('[BACKGROUND] Error submitting my poor proofs:', error);
                 throw error;
             }
 

@@ -150,6 +150,12 @@ class ReclaimContentScript {
           action: RECLAIM_SDK_ACTIONS.VERIFICATION_COMPLETED,
           data: data.proof
         }, '*');
+        
+        // Update popup with success message
+        if (this.verificationPopup) {
+          this.verificationPopup.handleProofSubmitted();
+        }
+        
         sendResponse({ success: true });
         break;
 
@@ -169,7 +175,7 @@ class ReclaimContentScript {
         if (this.verificationPopup) {
           console.log('[CONTENT] Removing existing verification popup.');
           try {
-            document.body.removeChild(this.verificationPopup);
+            document.body.removeChild(this.verificationPopup.element);
           } catch (e) {
             console.warn('[CONTENT] Failed to remove old popup, it might have already been detached:', e.message);
           }
@@ -201,14 +207,14 @@ class ReclaimContentScript {
 
           console.log('[CONTENT] Appending popup to document.body.');
           try {
-            document.body.appendChild(this.verificationPopup);
+            document.body.appendChild(this.verificationPopup.element);
             console.log('[CONTENT] Popup appended. Checking visibility...');
-            if (this.verificationPopup.offsetParent === null) {
+            if (this.verificationPopup.element.offsetParent === null) {
               console.warn('[CONTENT] Popup appended but offsetParent is null. It might be display:none or not in the layout.');
             } else {
               console.log('[CONTENT] Popup appended and seems to be in layout (offsetParent is not null).');
             }
-            const rect = this.verificationPopup.getBoundingClientRect();
+            const rect = this.verificationPopup.element.getBoundingClientRect();
             console.log('[CONTENT] Popup rect:', rect);
             if (rect.width === 0 || rect.height === 0) {
               console.warn('[CONTENT] Popup has zero width or height.');
@@ -232,6 +238,71 @@ class ReclaimContentScript {
         }
 
         sendResponse({ success: true, message: 'Popup display process initiated and will proceed on DOM readiness.' });
+        break;
+
+      // Handle status update messages from background script
+      case MESSAGE_ACTIONS.CLAIM_CREATION_REQUESTED:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Claim creation requested for request hash:', data.requestHash);
+          this.verificationPopup.handleClaimCreationRequested(data.requestHash);
+        }
+        sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.CLAIM_CREATION_SUCCESS:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Claim creation success for request hash:', data.requestHash);
+          this.verificationPopup.handleClaimCreationSuccess(data.requestHash);
+        }
+        sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.CLAIM_CREATION_FAILED:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Claim creation failed for request hash:', data.requestHash);
+          this.verificationPopup.handleClaimCreationFailed(data.requestHash);
+        }
+        sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.PROOF_GENERATION_STARTED:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Proof generation started for request hash:', data.requestHash);
+          this.verificationPopup.handleProofGenerationStarted(data.requestHash);
+        }
+        sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.PROOF_GENERATION_SUCCESS:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Proof generation success for request hash:', data.requestHash);
+          this.verificationPopup.handleProofGenerationSuccess(data.requestHash);
+        }
+        sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.PROOF_GENERATION_FAILED:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Proof generation failed for request hash:', data.requestHash);
+          this.verificationPopup.handleProofGenerationFailed(data.requestHash);
+        }
+        sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.PROOF_SUBMITTED:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Proof submitted');
+          this.verificationPopup.handleProofSubmitted();
+        }
+        sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.PROOF_SUBMISSION_FAILED:
+        if (this.verificationPopup) {
+          console.log('[CONTENT] Proof submission failed:', data.error);
+          this.verificationPopup.handleProofSubmissionFailed(data.error);
+        }
+        sendResponse({ success: true });
         break;
 
       default:

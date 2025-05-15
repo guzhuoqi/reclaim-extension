@@ -1,4 +1,4 @@
-export const formatProof = (proof, providerData) => {
+export const formatProof = (proof, requestData) => {
     let formattedProof = {
         identifier: proof.claim.identifier,
         claimData: proof.claim,
@@ -11,7 +11,7 @@ export const formatProof = (proof, providerData) => {
         ],
         taskId: null,
         publicData: null,
-        providerRequest: providerData.requestData[0]
+        providerRequest: requestData
     }
     return formattedProof;
 };

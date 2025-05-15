@@ -49,12 +49,12 @@ export const submitProofOnCallback = async (proofs, submitUrl, sessionId) => {
         // check if response is valid
         if (!response.ok) {
             await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_SUBMISSION_FAILED);
-            throw new Error('Failed to submit proof');
+            throw new Error('Failed to submit proof to Callback and update session status');
         }
         await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_SUBMITTED);
         return res;
     } catch (error) {
-        console.error('Error submitting proof:', error);
+        console.error('Error submitting proof to Callback:', error);
         throw error;
     }
 }
