@@ -25,6 +25,7 @@ class ReclaimExtensionManager {
         this.requestHeadersMap = new Map();
         this.requestBodyMap = new Map();
         this.initPopupMessage = new Map();
+        this.interceptedResponsesMap = new Map(); // Map to store intercepted responses
 
         // Set to track processed requests to avoid duplicates
         this.processedRequests = new Set();
@@ -141,6 +142,19 @@ class ReclaimExtensionManager {
                         sendResponse({ success: false, error: 'Action not supported' });
                     }
                     return true;
+
+                // Handle intercepted responses from network interceptor
+                case 'INTERCEPTED_RESPONSE':
+                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                        // Only log URLs for privacy, not the actual response body
+                        console.log('[BACKGROUND] Received intercepted response for URL:', data.url);
+                        // Store the intercepted response using the URL as key
+                        this.interceptedResponsesMap.set(data.url, data);
+                        // Clean up old entries from the map
+                        this.cleanupInterceptedResponsesMap();
+                        // No need to send a response as this is a one-way message
+                    }
+                    break;
 
                 default:
                     console.log('[BACKGROUND] Message received but not processed:', action);
@@ -492,6 +506,28 @@ class ReclaimExtensionManager {
         }
     }
 
+    // Helper method to wait for an intercepted response
+    async waitForInterceptedResponse(url, maxWaitTimeMs = 3000, intervalMs = 200) {
+        console.log(`[BACKGROUND] Waiting for intercepted response for URL: ${url}`);
+        
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < maxWaitTimeMs) {
+            // Check if we have the response
+            if (this.interceptedResponsesMap.has(url)) {
+                console.log(`[BACKGROUND] Found intercepted response after ${Date.now() - startTime}ms`);
+                return this.interceptedResponsesMap.get(url);
+            }
+            
+            // Wait for the next interval
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+            console.log(`[BACKGROUND] Still waiting for response... (${Date.now() - startTime}ms elapsed)`);
+        }
+        
+        console.log(`[BACKGROUND] Timed out waiting for intercepted response after ${maxWaitTimeMs}ms`);
+        return null;
+    }
+
     // Process the complete request when we have both headers and body
     async processCompleteRequest(requestId) {
         try {
@@ -558,14 +594,20 @@ class ReclaimExtensionManager {
                         `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` :
                         'No body for the matching request!');
 
-                // Create a flag to prevent multiple replays for the same request
-                let replayCompleted = false;
+                // Wait for intercepted response with timeout
+                const interceptedResponse = await this.waitForInterceptedResponse(formattedRequest.url);
+                
+                if (interceptedResponse) {
+                    console.log('[BACKGROUND] Found intercepted response for this URL');
+                    formattedRequest.responseText = interceptedResponse.responseBody;
 
-                // Replay the request to get the response body
-                console.log('[BACKGROUND] Replaying request to get response body...');
-                try {
-                    if (!replayCompleted) {
-                        replayCompleted = true;
+                    console.log('[BACKGROUND] Response successfully obtained from interceptor:');
+                    console.log('[BACKGROUND] - Status:', interceptedResponse.responseStatus);
+                    console.log('[BACKGROUND] - Response body length:', interceptedResponse.responseBody.length);
+                } else {
+                    console.log('[BACKGROUND] No intercepted response found after waiting, falling back to replay request');
+                    // Fallback to the existing replay logic
+                    try {
                         // Use a 1500ms delay for the initial request to avoid rate limiting
                         const responseResult = await replayRequest(formattedRequest, true, 1500);
 
@@ -581,18 +623,14 @@ class ReclaimExtensionManager {
                         }
 
                         // Log response info
-                        console.log('[BACKGROUND] Response successfully obtained:');
+                        console.log('[BACKGROUND] Response successfully obtained from replay:');
                         console.log('[BACKGROUND] - Status:', responseResult.status);
                         console.log('[BACKGROUND] - Content Type:', responseResult.contentType);
                         console.log('[BACKGROUND] - Response body length:', responseResult.responseText.length);
-                        console.log('[BACKGROUND] - Response body:', responseResult.responseText);
-                    } else {
-                        console.log('[BACKGROUND] Replay already completed, skipping duplicate replay');
+                    } catch (replayError) {
+                        console.error('[BACKGROUND] Failed to replay request:', replayError);
+                        // We continue even if replay fails - some providers may not require the response body
                     }
-
-                } catch (replayError) {
-                    console.error('[BACKGROUND] Failed to replay request:', replayError);
-                    // We continue even if replay fails - some providers may not require the response body
                 }
 
                 console.log('[BACKGROUND] ==========================================');
@@ -634,6 +672,24 @@ class ReclaimExtensionManager {
         for (const [key, value] of this.requestBodyMap.entries()) {
             if (now - value.timestamp > timeout) {
                 this.requestBodyMap.delete(key);
+            }
+        }
+    }
+
+    // Clean up old entries from intercepted responses map (older than 1 minute)
+    cleanupInterceptedResponsesMap() {
+        const now = Date.now();
+        const timeout = 60000; // 1 minute
+
+        // Add timestamp to new entries if not already present
+        for (const [key, value] of this.interceptedResponsesMap.entries()) {
+            if (!value.timestamp) {
+                value.timestamp = now;
+                this.interceptedResponsesMap.set(key, value);
+            }
+            
+            if (now - value.timestamp > timeout) {
+                this.interceptedResponsesMap.delete(key);
             }
         }
     }

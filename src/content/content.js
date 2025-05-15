@@ -226,6 +226,17 @@ class ReclaimContentScript {
         }, '*');
       }
       
+      // Handle intercepted network responses
+      if (action === 'INTERCEPTED_RESPONSE' && data) {
+        // Forward the intercepted response to background script
+        chrome.runtime.sendMessage({
+          action: 'INTERCEPTED_RESPONSE',
+          source: MESSAGER_TYPES.CONTENT_SCRIPT,
+          target: MESSAGER_TYPES.BACKGROUND,
+          data: data
+        });
+      }
+      
       // Handle start verification request from SDK
       if (action === RECLAIM_SDK_ACTIONS.START_VERIFICATION && data) {
         // Forward the template data to background script

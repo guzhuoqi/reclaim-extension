@@ -338,6 +338,18 @@
                 status: response.status,
                 body: response.body,
             });
+            
+            // Send response data to content script
+            window.postMessage({
+                action: 'INTERCEPTED_RESPONSE',
+                data: {
+                    url: request.url,
+                    method: request.options.method,
+                    responseStatus: response.status,
+                    responseBody: response.body
+                    // Removed responseHeaders to avoid DataCloneError
+                }
+            }, '*');
         });
 
         /**
