@@ -1,7 +1,7 @@
 // Import polyfills
 import '../polyfills';
 
-import { MESSAGER_ACTIONS, MESSAGER_TYPES } from '../constants/index';
+import { MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../constants/index';
 import { ensureOffscreenDocument } from '../offscreen-manager';
 
 // Main function to generate proof using offscreen document
@@ -19,13 +19,13 @@ export const generateProof = async (claimData) => {
       const messageTimeout = setTimeout(() => {
         console.error('[PROOF-GENERATOR] Timeout waiting for offscreen document to generate proof');
         reject(new Error('Timeout generating proof in offscreen document'));
-      }, 30000); // 30 second timeout
+      }, 60000); // 60 second timeout
       
       // Create a message listener for the offscreen response
       const messageListener = (response) => {
-        if (response.action === MESSAGER_ACTIONS.GENERATE_PROOF_RESPONSE && 
-            response.source === MESSAGER_TYPES.OFFSCREEN &&
-            response.target === MESSAGER_TYPES.BACKGROUND) {
+        if (response.action === MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE && 
+            response.source === MESSAGE_SOURCES.OFFSCREEN &&
+            response.target === MESSAGE_SOURCES.BACKGROUND) {
           
           // Clear timeout and remove listener
           clearTimeout(messageTimeout);
@@ -46,9 +46,9 @@ export const generateProof = async (claimData) => {
       
       // Send message to offscreen document to generate proof
       chrome.runtime.sendMessage({
-        action: MESSAGER_ACTIONS.GENERATE_PROOF,
-        source: MESSAGER_TYPES.BACKGROUND,
-        target: MESSAGER_TYPES.OFFSCREEN,
+        action: MESSAGE_ACTIONS.GENERATE_PROOF,
+        source: MESSAGE_SOURCES.BACKGROUND,
+        target: MESSAGE_SOURCES.OFFSCREEN,
         data: claimData
       }, (sendResponse) => {
         if (chrome.runtime.lastError) {

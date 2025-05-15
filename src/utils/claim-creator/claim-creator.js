@@ -5,7 +5,7 @@ import {
     extractParamsFromResponse,
     separateParams
 } from './params-extractor';
-import { MESSAGER_ACTIONS, MESSAGER_TYPES } from '../constants';
+import { MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../constants';
 import { ensureOffscreenDocument } from '../offscreen-manager';
 
 const getPrivateKeyFromOffscreen = () => {
@@ -18,9 +18,9 @@ const getPrivateKeyFromOffscreen = () => {
 
         const messageListener = (message, sender) => {
             // Ensure the message is from the offscreen document and is the expected response
-            if (message.action === MESSAGER_ACTIONS.GET_PRIVATE_KEY_RESPONSE &&
-                message.source === MESSAGER_TYPES.OFFSCREEN &&
-                message.target === MESSAGER_TYPES.BACKGROUND) { // Assuming this script runs in background context
+            if (message.action === MESSAGE_ACTIONS.GET_PRIVATE_KEY_RESPONSE &&
+                message.source === MESSAGE_SOURCES.OFFSCREEN &&
+                message.target === MESSAGE_SOURCES.BACKGROUND) { // Assuming this script runs in background context
 
                 clearTimeout(callTimeout);
                 chrome.runtime.onMessage.removeListener(messageListener);
@@ -41,9 +41,9 @@ const getPrivateKeyFromOffscreen = () => {
 
         console.log('[CLAIM-CREATOR] Requesting private key from offscreen document');
         chrome.runtime.sendMessage({
-            action: MESSAGER_ACTIONS.GET_PRIVATE_KEY,
-            source: MESSAGER_TYPES.BACKGROUND, // Assuming this script runs in background context
-            target: MESSAGER_TYPES.OFFSCREEN
+            action: MESSAGE_ACTIONS.GET_PRIVATE_KEY,
+            source: MESSAGE_SOURCES.BACKGROUND, // Assuming this script runs in background context
+            target: MESSAGE_SOURCES.OFFSCREEN
         }, response => {
             if (chrome.runtime.lastError) {
                 clearTimeout(callTimeout);

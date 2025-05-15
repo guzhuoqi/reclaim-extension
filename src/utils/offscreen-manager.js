@@ -1,5 +1,5 @@
 // src/utils/offscreen-manager.js
-import { MESSAGER_ACTIONS, MESSAGER_TYPES } from './constants';
+import { MESSAGE_ACTIONS, MESSAGE_SOURCES } from './constants';
 
 // Track the offscreen document status
 let offscreenReady = false;
@@ -18,9 +18,9 @@ const setupOffscreenReadyListener = () => {
 };
 
 const offscreenGlobalListener = (message) => {
-    if (message.action === MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY &&
-        message.source === MESSAGER_TYPES.OFFSCREEN &&
-        message.target === MESSAGER_TYPES.BACKGROUND) { // Assumes this manager runs in background context
+    if (message.action === MESSAGE_ACTIONS.OFFSCREEN_DOCUMENT_READY &&
+        message.source === MESSAGE_SOURCES.OFFSCREEN &&
+        message.target === MESSAGE_SOURCES.BACKGROUND) { // Assumes this manager runs in background context
       console.log('[OFFSCREEN-MANAGER] Received offscreen ready signal (global listener).');
       offscreenReady = true;
       if (offscreenDocTimeout) { // If waitForOffscreenReady set a timeout
@@ -73,8 +73,8 @@ async function waitForOffscreenReadyInternal(timeoutMs = 15000) {
   try {
     chrome.runtime.sendMessage({
       action: 'PING_OFFSCREEN',
-      source: MESSAGER_TYPES.BACKGROUND,
-      target: MESSAGER_TYPES.OFFSCREEN
+      source: MESSAGE_SOURCES.BACKGROUND,
+      target: MESSAGE_SOURCES.OFFSCREEN
     }, (response) => {
       if (chrome.runtime.lastError) {
         // console.warn(`[OFFSCREEN-MANAGER] Ping to offscreen failed or no listener: ${chrome.runtime.lastError.message}`);
@@ -95,9 +95,9 @@ async function waitForOffscreenReadyInternal(timeoutMs = 15000) {
     }
 
     const listener = (message) => {
-      if (message.action === MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY &&
-          message.source === MESSAGER_TYPES.OFFSCREEN &&
-          message.target === MESSAGER_TYPES.BACKGROUND) {
+      if (message.action === MESSAGE_ACTIONS.OFFSCREEN_DOCUMENT_READY &&
+          message.source === MESSAGE_SOURCES.OFFSCREEN &&
+          message.target === MESSAGE_SOURCES.BACKGROUND) {
         // console.log('[OFFSCREEN-MANAGER] Offscreen ready signal received by waitForOffscreenReadyInternal listener.');
         offscreenReady = true;
         clearTimeout(localTimeoutId);

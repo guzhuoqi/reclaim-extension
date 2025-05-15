@@ -322,35 +322,159 @@
         // Create instance of the interceptor
         const interceptor = new RequestInterceptor();
 
-        // Example middleware for logging requests
+        // Request middleware for capturing and sending requests to content script
         interceptor.addRequestMiddleware(async (request) => {
-            debug.info("Request:", {
-                url: request.url,
-                method: request.options.method,
-                headers: request.options.headers,
-            });
+            // debug.info("Request:", {
+            //     url: request.url,
+            //     method: request.options.method,
+            //     headers: request.options.headers,
+            // });
+            
+            // Create a completely new object with only primitive values
+            try {
+                // Safely extract headers as a plain object
+                let headersObj = {};
+                try {
+                    if (request.options.headers) {
+                        if (request.options.headers instanceof Headers) {
+                            headersObj = Object.fromEntries(request.options.headers.entries());
+                        } else if (typeof request.options.headers === 'object') {
+                            // Only copy string values from headers
+                            Object.keys(request.options.headers).forEach(key => {
+                                const val = request.options.headers[key];
+                                if (typeof val === 'string' || typeof val === 'number') {
+                                    headersObj[key] = String(val);
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {
+                    debug.error("Error extracting headers:", e);
+                }
+                
+                // Safely extract body
+                let bodyStr = null;
+                try {
+                    if (request.options.body) {
+                        if (typeof request.options.body === 'string') {
+                            bodyStr = request.options.body;
+                        } else if (typeof request.options.body === 'object') {
+                            bodyStr = JSON.stringify(request.options.body);
+                        }
+                    }
+                } catch (e) {
+                    debug.error("Error extracting body:", e);
+                }
+                
+                // Create a simple, serializable object
+                const simpleRequest = {
+                    url: typeof request.url === 'string' ? 
+                        (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
+                        (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                    method: typeof request.options.method === 'string' ? request.options.method : 'GET',
+                    headers: headersObj,
+                    body: bodyStr
+                };
+                
+                // Send the simplified request data
+                window.postMessage({
+                    action: 'INTERCEPTED_REQUEST',
+                    data: simpleRequest
+                }, '*');
+            } catch (error) {
+                debug.error("Error posting request data:", error);
+                // Send minimal data as fallback
+                window.postMessage({
+                    action: 'INTERCEPTED_REQUEST',
+                    data: {
+                        url: typeof request.url === 'string' ? 
+                            (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
+                            (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                        method: typeof request.options.method === 'string' ? request.options.method : 'GET',
+                        headers: {},
+                        body: null
+                    }
+                }, '*');
+            }
         });
 
-        // Example middleware for logging responses
+        // Response middleware for capturing and sending responses to content script
         interceptor.addResponseMiddleware(async (response, request) => {
-            debug.info("Response:", {
-                url: request.url,
-                status: response.status,
-                body: response.body,
-            });
-            
-            // Send response data to content script
-            window.postMessage({
-                action: 'INTERCEPTED_RESPONSE',
-                data: {
-                    url: request.url,
-                    method: request.options.method,
-                    responseStatus: response.status,
-                    responseBody: response.body
-                    // Removed responseHeaders to avoid DataCloneError
+            // debug.info("Response:", {
+            //     url: request.url,
+            //     status: response.status,
+            //     body: response.body,
+            // });
+
+
+            // Create a completely new object with only primitive values
+            try {
+                // Safely extract headers as a plain object
+                let headersObj = {};
+                try {
+                    if (response.headers) {
+                        if (response.headers instanceof Headers) {
+                            headersObj = Object.fromEntries(response.headers.entries());
+                        } else if (typeof response.headers === 'object') {
+                            // Only copy string values from headers
+                            Object.keys(response.headers).forEach(key => {
+                                const val = response.headers[key];
+                                if (typeof val === 'string' || typeof val === 'number') {
+                                    headersObj[key] = String(val);
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {
+                    debug.error("Error extracting headers:", e);
                 }
-            }, '*');
+
+                // Safely extract body
+                let bodyStr = null;
+                try {
+                    if (response.body) {
+                        if (typeof response.body === 'string') {
+                            bodyStr = response.body;
+                        } else if (typeof response.body === 'object') {
+                            bodyStr = JSON.stringify(response.body);
+                        }
+                    }
+                } catch (e) {
+                    debug.error("Error extracting body:", e);
+                }
+
+                // Create a simple, serializable object
+                const simpleResponse = {
+                    url: typeof request.url === 'string' ? 
+                        (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
+                        (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                    status: response.status,
+                    headers: headersObj,
+                    body: bodyStr
+                };
+
+                // Send the simplified response data
+                window.postMessage({
+                    action: 'INTERCEPTED_RESPONSE',
+                    data: simpleResponse
+                }, '*');
+            } catch (error) {
+                debug.error("Error posting response data:", error);
+                // Send minimal data as fallback
+                window.postMessage({
+                    action: 'INTERCEPTED_RESPONSE',
+                    data: {
+                        url: typeof request.url === 'string' ? 
+                            (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
+                            (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                        status: response.status,
+                        headers: {},
+                        body: null
+                    }
+                }, '*');
+            }
         });
+
 
         /**
          * Expose the interceptor instance globally

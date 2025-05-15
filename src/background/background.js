@@ -2,62 +2,52 @@
 import '../utils/polyfills';
 
 // Import necessary utilities and libraries
-import { filterRequest } from '../utils/claim-creator';
 import { fetchProviderData, updateSessionStatus, submitProofOnCallback } from '../utils/fetch-calls';
-import { RECLAIM_SESSION_STATUS, MESSAGER_ACTIONS, MESSAGER_TYPES } from '../utils/constants';
+import { RECLAIM_SESSION_STATUS, MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../utils/constants';
 import { generateProof, formatProof } from '../utils/proof-generator';
-import { testPolyfills } from '../utils/polyfill-test';
 import { createClaimObject } from '../utils/claim-creator';
-import { replayRequest } from '../utils/claim-creator';
 
 class ReclaimExtensionManager {
     constructor() {
         this.activeTabId = null;
-        this.isNetworkListenerActive = false;
-        this.disableNetworkMonitoring();
         this.providerData = null;
         this.parameters = null;
         this.sessionId = null;
         this.callbackUrl = null;
         this.originalTabId = null;
 
-        // Create maps to store request data
-        this.requestHeadersMap = new Map();
-        this.requestBodyMap = new Map();
-        this.initPopupMessage = new Map();
-        this.interceptedResponsesMap = new Map(); // Map to store intercepted responses
 
-        // Set to track processed requests to avoid duplicates
-        this.processedRequests = new Set();
+        // Map to store generated proofs by session ID
+        this.generatedProofs = new Map();
+        this.filteredRequests = new Map();
+
+
+        // Map to store popup messages for content script
+        this.initPopupMessage = new Map();
+        this.providerDataMessage = new Map();
 
         // Initialize extension
         this.init();
     }
 
     async init() {
-        // Test polyfills
-        // const polyfillTestResults = testPolyfills();
-        // console.log('Polyfill test results:', polyfillTestResults);
-
         // Register message handler
         chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-
     }
 
     async handleMessage(message, sender, sendResponse) {
-
         const { action, source, target, data } = message;
         console.log('[BACKGROUND] Received message from', source, 'to', target, 'with action', action, 'for tab', sender.tab?.id);
 
         try {
             switch (action) {
                 // Handle content script loaded message
-                case MESSAGER_ACTIONS.CONTENT_SCRIPT_LOADED:
-                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                case MESSAGE_ACTIONS.CONTENT_SCRIPT_LOADED:
+                    if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log(`[BACKGROUND] Content script loaded in tab ${sender.tab?.id} for URL: ${data.url}`);
 
                         // Check if there's a pending popup message for this tab
-                        if (sender.tab?.id && this.initPopupMessage.has(sender.tab.id)) {
+                        if (sender.tab?.id && this.initPopupMessage && this.initPopupMessage.has(sender.tab.id)) {
                             const pendingMessage = this.initPopupMessage.get(sender.tab.id);
                             console.log(`[BACKGROUND] Found pending popup message for tab ${sender.tab.id}. Sending now.`);
                             chrome.tabs.sendMessage(sender.tab.id, pendingMessage.message)
@@ -71,17 +61,51 @@ class ReclaimExtensionManager {
                                 .catch(error => console.error(`[BACKGROUND] Error sending (pending) SHOW_PROVIDER_VERIFICATION_POPUP to tab ${sender.tab.id} (promise catch):`, error));
                             this.initPopupMessage.delete(sender.tab.id); // Remove after attempting to send
                         }
+
+                        // Check if there is a pending provider data Message for this tab
+                        if (sender.tab?.id && this.providerDataMessage && this.providerDataMessage.has(sender.tab.id)) {
+                            const pendingMessage = this.providerDataMessage.get(sender.tab.id);
+                            console.log(`[BACKGROUND] Found pending provider data message for tab ${sender.tab.id}. Sending now.`);
+                            chrome.tabs.sendMessage(sender.tab.id, pendingMessage.message)
+                                .then(response => {
+                                    if (chrome.runtime.lastError) {
+                                        console.error(`[BACKGROUND] Error sending (pending) PROVIDER_DATA_READY to tab ${sender.tab.id}:`, chrome.runtime.lastError.message);
+                                    } else {
+                                        console.log(`[BACKGROUND] (Pending) PROVIDER_DATA_READY message acknowledged by content script for tab ${sender.tab.id}:`, response);
+                                    }
+                                })
+                                .catch(error => console.error(`[BACKGROUND] Error sending (pending) PROVIDER_DATA_READY to tab ${sender.tab.id} (promise catch):`, error));
+                            this.providerDataMessage.delete(sender.tab.id); // Remove after attempting to send
+                        }
+
                         sendResponse({ success: true });
                         break;
-                    } else {
-                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
-                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    break;
+
+                // Handle request provider data message
+                case MESSAGE_ACTIONS.REQUEST_PROVIDER_DATA:
+                    if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
+                        console.log('[BACKGROUND] Content script requested provider data');
+                        // check if the provider data is availble and send it to the content script else send not available
+                        if (this.providerData && this.parameters && this.sessionId && this.callbackUrl) {
+                            sendResponse({
+                                success: true, data: {
+                                    providerData: this.providerData,
+                                    parameters: this.parameters,
+                                    sessionId: this.sessionId,
+                                    callbackUrl: this.callbackUrl
+                                }
+                            });
+                        } else {
+                            sendResponse({ success: false, error: 'Provider data not available' });
+                        }
                     }
                     break;
 
                 // Handle start verification message
-                case MESSAGER_ACTIONS.START_VERIFICATION:
-                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                case MESSAGE_ACTIONS.START_VERIFICATION:
+                    if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log('[BACKGROUND] Starting verification with data:', data);
                         // Store the original tab ID
                         if (sender.tab && sender.tab.id) {
@@ -98,8 +122,8 @@ class ReclaimExtensionManager {
                     break;
 
                 // Handle offscreen document ready message
-                case MESSAGER_ACTIONS.OFFSCREEN_DOCUMENT_READY:
-                    if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
+                case MESSAGE_ACTIONS.OFFSCREEN_DOCUMENT_READY:
+                    if (source === MESSAGE_SOURCES.OFFSCREEN && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log('[BACKGROUND] Offscreen document is ready');
                         sendResponse({ success: true });
                     } else {
@@ -109,8 +133,8 @@ class ReclaimExtensionManager {
                     break;
 
                 // Handle generate proof response from offscreen document
-                case MESSAGER_ACTIONS.GENERATE_PROOF_RESPONSE:
-                    if (source === MESSAGER_TYPES.OFFSCREEN && target === MESSAGER_TYPES.BACKGROUND) {
+                case MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE:
+                    if (source === MESSAGE_SOURCES.OFFSCREEN && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log('[BACKGROUND] Received proof generation response from offscreen document');
                         // This message is handled by the proof-generator.js using the messageListener
                         // Just acknowledge receipt here
@@ -121,8 +145,8 @@ class ReclaimExtensionManager {
                     }
                     break;
 
-                case MESSAGER_ACTIONS.CLOSE_CURRENT_TAB:
-                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
+                case MESSAGE_ACTIONS.CLOSE_CURRENT_TAB:
+                    if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         if (sender.tab && sender.tab.id) {
                             chrome.tabs.remove(sender.tab.id, () => {
                                 if (chrome.runtime.lastError) {
@@ -143,16 +167,24 @@ class ReclaimExtensionManager {
                     }
                     return true;
 
-                // Handle intercepted responses from network interceptor
-                case 'INTERCEPTED_RESPONSE':
-                    if (source === MESSAGER_TYPES.CONTENT_SCRIPT && target === MESSAGER_TYPES.BACKGROUND) {
-                        // Only log URLs for privacy, not the actual response body
-                        console.log('[BACKGROUND] Received intercepted response for URL:', data.url);
-                        // Store the intercepted response using the URL as key
-                        this.interceptedResponsesMap.set(data.url, data);
-                        // Clean up old entries from the map
-                        this.cleanupInterceptedResponsesMap();
-                        // No need to send a response as this is a one-way message
+                // Handle filtered request from content script
+                case MESSAGE_ACTIONS.FILTERED_REQUEST_FOUND:
+                    if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
+                        console.log('[BACKGROUND] Received filtered request from content script');
+
+                        // check if the request is already in the filteredRequests map
+                        if (this.filteredRequests.has(data.criteria.requestHash)) {
+                            console.log('[BACKGROUND] Request already in filteredRequests map');
+                            sendResponse({ success: true, result: this.filteredRequests.get(data.criteria.requestHash) });
+                        } else {
+                            // Process the filtered request
+                            this.filteredRequests.set(data.criteria.requestHash, data.request);
+                            const result = await this.processFilteredRequest(data.request, data.criteria, data.sessionId);
+                            sendResponse({ success: true, result });
+                        }
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
                     }
                     break;
 
@@ -174,12 +206,21 @@ class ReclaimExtensionManager {
             // steps to start verification
             // 1. Fetch provider data from the backend
             // 2. Redirect to the provider login page
-            // 3. Start network monitoring
-            // 4. Filter the network requests
-            // 5. Extract the data from the network requests
-            // 6. Generate the proof
-            // 7. Submit the proof to the backend
-            // 8. Notify the SDK
+            // 3. Send provider data to content script for filtering
+            // 4. Content script will filter and send matching requests back
+            // 5. Process matching requests to generate proofs
+            // 6. Submit proofs to the backend
+            // 7. Notify the SDK
+
+            // clear all the member variables
+            this.providerData = null;
+            this.parameters = null;
+            this.sessionId = null;
+            this.callbackUrl = null;
+            this.generatedProofs = new Map();
+            this.filteredRequests = new Map();
+            this.initPopupMessage = new Map();
+            this.providerDataMessage = new Map();
 
             // fetch provider data
             const providerData = await fetchProviderData(templateData.providerId);
@@ -212,25 +253,44 @@ class ReclaimExtensionManager {
                 this.activeTabId = tab.id;
 
                 const providerName = this.providerData?.name || 'Default Provider';
-                const credentialType = this.providerData?.verificationConfig?.credentialType || 'Default Credential';
+                const description = this.providerData?.description || 'Default Description';
                 const dataRequired = this.providerData?.verificationConfig?.dataRequired || 'Default Data';
-                const loginConfirmSelector = this.providerData?.verificationConfig?.loginConfirmSelector || '#emirates-logout-button';
 
                 if (tab.id) {
                     const popupMessage = {
-                        action: MESSAGER_ACTIONS.SHOW_PROVIDER_VERIFICATION_POPUP,
-                        source: MESSAGER_TYPES.BACKGROUND,
-                        target: MESSAGER_TYPES.CONTENT_SCRIPT,
+                        action: MESSAGE_ACTIONS.SHOW_PROVIDER_VERIFICATION_POPUP,
+                        source: MESSAGE_SOURCES.BACKGROUND,
+                        target: MESSAGE_SOURCES.CONTENT_SCRIPT,
                         data: {
                             providerName,
-                            credentialType,
+                            description,
                             dataRequired,
-                            loginConfirmSelector
                         }
                     };
+
+                    const providerDataMessage = {
+                        action: MESSAGE_ACTIONS.PROVIDER_DATA_READY,
+                        source: MESSAGE_SOURCES.BACKGROUND,
+                        target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                        data: {
+                            providerData: this.providerData,
+                            parameters: this.parameters,
+                            sessionId: this.sessionId,
+                            callbackUrl: this.callbackUrl
+                        }
+                    };
+
+                    // Initialize the message map if it doesn't exist
+                    if (!this.initPopupMessage) {
+                        this.initPopupMessage = new Map();
+                    }
+
                     // Store the message in the init PopupMessage for the tab
-                    this.initPopupMessage.set(tab.id, popupMessage);
-                    console.log(`[BACKGROUND] Queued SHOW_PROVIDER_VERIFICATION_POPUP for tab ${tab.id}. Waiting for content script to load.`);
+                    this.initPopupMessage.set(tab.id, { message: popupMessage });
+
+                    // Store the provider data in the providerDataMap for the tab
+                    this.providerDataMessage.set(tab.id, { message: providerDataMessage });
+                    console.log(`[BACKGROUND] Queued SHOW_PROVIDER_VERIFICATION_POPUP and PROVIDER_DATA_READY for tab ${tab.id}. Waiting for content script to load.`);
 
                 } else {
                     console.error("[BACKGROUND] New tab does not have an ID, cannot queue message for popup.");
@@ -240,16 +300,11 @@ class ReclaimExtensionManager {
                 updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION)
                     .then(() => {
                         console.log('[BACKGROUND] Session status updated');
-
-                        // Start network monitoring after tab creation
-                        console.log('[BACKGROUND] Starting network monitoring');
-                        this.enableNetworkMonitoring();
                     })
                     .catch(error => {
                         console.error('[BACKGROUND] Error updating session status:', error);
                     });
             });
-
 
             return {
                 success: true,
@@ -261,92 +316,12 @@ class ReclaimExtensionManager {
         }
     }
 
-    enableNetworkMonitoring() {
-        if (this.isNetworkListenerActive) return;
 
-        try {
-            // Reset the processed requests set
-            this.processedRequests = new Set();
-
-            // Store bound methods to allow proper removal later
-            this.boundHandleNetworkRequest = this.handleNetworkRequest.bind(this);
-            this.boundHandleRequestHeaders = this.handleRequestHeaders.bind(this);
-            this.boundHandleBeforeSendHeaders = this.handleBeforeSendHeaders.bind(this);
-
-            // Listen for request bodies
-            chrome.webRequest.onBeforeRequest.addListener(
-                this.boundHandleNetworkRequest,
-                { urls: ["<all_urls>"] },
-                ["requestBody"]
-            );
-
-            // Listen for request headers before they're sent
-            chrome.webRequest.onBeforeSendHeaders.addListener(
-                this.boundHandleBeforeSendHeaders,
-                { urls: ["<all_urls>"] },
-                ["requestHeaders"]
-            );
-
-            // Listen for request headers after they're sent (includes additional headers)
-            chrome.webRequest.onSendHeaders.addListener(
-                this.boundHandleRequestHeaders,
-                { urls: ["<all_urls>"] },
-                ["requestHeaders"]
-            );
-
-            this.isNetworkListenerActive = true;
-            console.log('[BACKGROUND] Network monitoring enabled');
-        } catch (error) {
-            console.error('[BACKGROUND] Error enabling network monitoring:', error);
-        }
-    }
-
-    disableNetworkMonitoring() {
-        if (!this.isNetworkListenerActive) return;
-
-        try {
-            chrome.webRequest.onBeforeRequest.removeListener(this.boundHandleNetworkRequest);
-            chrome.webRequest.onBeforeSendHeaders.removeListener(this.boundHandleBeforeSendHeaders);
-            chrome.webRequest.onSendHeaders.removeListener(this.boundHandleRequestHeaders);
-            this.isNetworkListenerActive = false;
-            console.log('Network monitoring disabled');
-
-            // Clear request maps
-            this.requestHeadersMap.clear();
-            this.requestBodyMap.clear();
-        } catch (error) {
-            console.error('[BACKGROUND] Error disabling network monitoring:', error);
-        }
-    }
-
-    // Generate a unique request ID to correlate different parts of the same request
-    generateRequestId(details) {
-        // Include requestId, url and timestamp to ensure uniqueness
-        return `${details.requestId}_${details.url}_${Date.now()}`;
-    }
-
-    // Extract cookie string from request headers
-    extractCookieStr(requestHeaders) {
-        if (!requestHeaders) return null;
-
-        // Try to find the Cookie header
-        const cookieHeader = requestHeaders.find(header =>
-            header.name.toLowerCase() === 'cookie'
-        );
-
-        if (cookieHeader) {
-            return cookieHeader.value;
-        }
-
-        // If no cookie header found in request headers, try to get from chrome.cookies API
-        // Note: This requires the "cookies" permission in manifest.json
-        return null;
-    }
-
-    // Additional method to get cookies for a URL using chrome.cookies API
+    // Get cookies for a specific URL
     async getCookiesForUrl(url) {
         try {
             if (!chrome.cookies || !chrome.cookies.getAll) {
+                console.warn('[BACKGROUND] Chrome cookies API not available');
                 return null;
             }
 
@@ -366,370 +341,172 @@ class ReclaimExtensionManager {
         }
     }
 
-    // Handle before send headers event to capture headers early
-    handleBeforeSendHeaders(details) {
+
+    // Process a filtered request from content script
+    async processFilteredRequest(request, criteria, sessionId) {
         try {
+            console.log('[BACKGROUND] Processing filtered request:', request.url);
 
-            const requestId = details.requestId;
+            // Get cookies for this specific URL
+            const cookies = await this.getCookiesForUrl(request.url);
 
-            // Convert headers array to object for easier use
-            const headersObject = {};
-            if (details.requestHeaders) {
-                details.requestHeaders.forEach(header => {
-                    headersObject[header.name] = header.value;
-                });
-            }
-
-            // Extract cookie string
-            const cookieStr = this.extractCookieStr(details.requestHeaders);
-
-            // Store headers with the request ID
-            this.requestHeadersMap.set(requestId, {
-                timestamp: Date.now(),
-                url: details.url,
-                headers: headersObject,
-                cookieStr: cookieStr
-            });
-
-            // Clean up old entries from requestHeadersMap
-            this.cleanupRequestMaps();
-
-            // Check if we already have the body for this request
-            if (this.requestBodyMap.has(requestId)) {
-                this.processCompleteRequest(requestId);
-            }
-        } catch (error) {
-            console.error('[BACKGROUND] Error in handleBeforeSendHeaders:', error);
-        }
-    }
-
-    // Handle send headers event - this happens after the request is sent
-    handleRequestHeaders(details) {
-        try {
-
-            const requestId = details.requestId;
-
-            // Update the headers if we already have them from before send
-            if (this.requestHeadersMap.has(requestId)) {
-                const existingData = this.requestHeadersMap.get(requestId);
-
-                // Convert the headers array to an object
-                const headersObject = {};
-                if (details.requestHeaders) {
-                    details.requestHeaders.forEach(header => {
-                        headersObject[header.name] = header.value;
-                    });
-                }
-
-                // Extract cookie string
-                const cookieStr = this.extractCookieStr(details.requestHeaders) || existingData.cookieStr;
-
-                // Update with potentially more complete headers
-                existingData.headers = headersObject;
-                existingData.cookieStr = cookieStr;
-                this.requestHeadersMap.set(requestId, existingData);
-
-                // Check if we have the body for this request
-                if (this.requestBodyMap.has(requestId)) {
-                    this.processCompleteRequest(requestId);
-                }
+            // Add cookies to the request
+            if (cookies) {
+                request.cookieStr = cookies;
+                console.log('[BACKGROUND] Added cookies to request with length:', request.cookieStr.length);
             } else {
-                // If we don't have headers yet, add them
-                const headersObject = {};
-                if (details.requestHeaders) {
-                    details.requestHeaders.forEach(header => {
-                        headersObject[header.name] = header.value;
-                    });
-                }
-
-                // Extract cookie string
-                const cookieStr = this.extractCookieStr(details.requestHeaders);
-
-                this.requestHeadersMap.set(requestId, {
-                    timestamp: Date.now(),
-                    url: details.url,
-                    headers: headersObject,
-                    cookieStr: cookieStr
-                });
-
-                // Check if we have the body for this request
-                if (this.requestBodyMap.has(requestId)) {
-                    this.processCompleteRequest(requestId);
-                }
-            }
-        } catch (error) {
-            console.error('[BACKGROUND] Error handling request headers:', error);
-        }
-    }
-
-    // Handle request body
-    async handleNetworkRequest(details) {
-        try {
-
-            const requestId = details.requestId;
-            let body = null;
-
-            // Extract and format request body if available
-            if (details.requestBody) {
-                if (details.requestBody.raw) {
-                    // Raw binary data
-                    const encoder = new TextDecoder('utf-8');
-                    try {
-                        const rawData = details.requestBody.raw[0].bytes;
-                        body = encoder.decode(rawData);
-                    } catch (e) {
-                        console.warn('Could not decode request body', e);
-                    }
-                } else if (details.requestBody.formData) {
-                    // Form data
-                    body = JSON.stringify(details.requestBody.formData);
-                }
+                console.log('[BACKGROUND] No cookies found for URL:', request.url);
             }
 
-            // Store the body information
-            this.requestBodyMap.set(requestId, {
-                timestamp: Date.now(),
-                url: details.url,
-                method: details.method || 'GET',
-                body
+            // Create claim object from the request and criteria
+            // send a message to the content script to notify of the claim creation started
+            chrome.tabs.sendMessage(this.activeTabId, {
+                action: MESSAGE_ACTIONS.CLAIM_CREATION_REQUESTED,
+                source: MESSAGE_SOURCES.BACKGROUND,
+                target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                data: { requestHash: criteria.requestHash }
             });
 
-            // Clean up old entries
-            this.cleanupRequestMaps();
-
-            // Check if we already have headers for this request
-            if (this.requestHeadersMap.has(requestId)) {
-                await this.processCompleteRequest(requestId);
+            let claimData = null;
+            try {
+                claimData = await createClaimObject(request, criteria, sessionId);
+            } catch (error) {
+                console.error('[BACKGROUND] Error creating claim object:', error);
+                // send a message to the content script to notify of the claim creation failed
+                chrome.tabs.sendMessage(this.activeTabId, {
+                    action: MESSAGE_ACTIONS.CLAIM_CREATION_FAILED,
+                    source: MESSAGE_SOURCES.BACKGROUND,
+                    target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                    data: { requestHash: criteria.requestHash }
+                });
+                return { success: false, error: error.message };
             }
+
+            // send a message to the content script to notify of the claim creation success
+            if (claimData) {
+                chrome.tabs.sendMessage(this.activeTabId, {
+                    action: MESSAGE_ACTIONS.CLAIM_CREATION_SUCCESS,
+                    source: MESSAGE_SOURCES.BACKGROUND,
+                    target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                    data: { requestHash: criteria.requestHash }
+                });
+            }
+
+            // Generate proof for the claim
+            const proof = await this.generateProofData(claimData, criteria.requestHash);
+            console.log('[BACKGROUND] Proof generated successfully:', proof);
+
+            const requestHash = criteria.requestHash;
+            // Store the generated proof in case we need it later
+            if (!this.generatedProofs.has(requestHash)) {
+                this.generatedProofs.set(requestHash, []);
+            }
+            this.generatedProofs.get(requestHash).push(proof);
+
+
+            // check if all the proofs are generated and then call submit proof
+            if (this.generatedProofs.size === this.providerData.requestData.length) {
+                await this.submitProofs();
+            }
+
+            return { success: true, proof };
         } catch (error) {
-            console.error('[BACKGROUND] Error handling network request:', error);
+            console.error('[BACKGROUND] Error processing filtered request:', error);
+            return { success: false, error: error.message };
         }
     }
 
-    // Helper method to wait for an intercepted response
-    async waitForInterceptedResponse(url, maxWaitTimeMs = 3000, intervalMs = 200) {
-        console.log(`[BACKGROUND] Waiting for intercepted response for URL: ${url}`);
-        
-        const startTime = Date.now();
-        
-        while (Date.now() - startTime < maxWaitTimeMs) {
-            // Check if we have the response
-            if (this.interceptedResponsesMap.has(url)) {
-                console.log(`[BACKGROUND] Found intercepted response after ${Date.now() - startTime}ms`);
-                return this.interceptedResponsesMap.get(url);
-            }
-            
-            // Wait for the next interval
-            await new Promise(resolve => setTimeout(resolve, intervalMs));
-            console.log(`[BACKGROUND] Still waiting for response... (${Date.now() - startTime}ms elapsed)`);
-        }
-        
-        console.log(`[BACKGROUND] Timed out waiting for intercepted response after ${maxWaitTimeMs}ms`);
-        return null;
-    }
-
-    // Process the complete request when we have both headers and body
-    async processCompleteRequest(requestId) {
-        try {
-            // If network monitoring is already disabled, skip processing
-            // This prevents multiple processing of the same request
-            if (!this.isNetworkListenerActive) {
-                return;
-            }
-
-            // If we've already processed this request, skip it
-            if (this.processedRequests.has(requestId)) {
-                return;
-            }
-
-            const headerInfo = this.requestHeadersMap.get(requestId);
-            const bodyInfo = this.requestBodyMap.get(requestId);
-
-            if (!headerInfo || !bodyInfo) {
-                return; // Still missing part of the request
-            }
-
-            // Mark this request as processed
-            this.processedRequests.add(requestId);
-
-            // Try to get cookies using chrome.cookies API if they weren't found in headers
-            let cookieStr = headerInfo.cookieStr;
-            if (!cookieStr) {
-                cookieStr = await this.getCookiesForUrl(bodyInfo.url);
-            }
-
-            // Create complete request object
-            const formattedRequest = {
-                url: bodyInfo.url,
-                method: bodyInfo.method,
-                body: bodyInfo.body,
-                headers: headerInfo.headers || {},
-                cookieStr: cookieStr
-            };
-
-            // Check if this request matches our criteria
-            const matchingCriteria = this.providerData.requestData.find(criteria =>
-                filterRequest(formattedRequest, criteria, this.parameters)
-            );
-
-            if (matchingCriteria) {
-                // IMMEDIATELY disable network monitoring to prevent further captures
-                // This must be done before the async replay to prevent race conditions
-                this.disableNetworkMonitoring();
-
-                console.log('[BACKGROUND] ==========================================');
-                console.log('[BACKGROUND] MATCHING REQUEST FOUND');
-                console.log('[BACKGROUND] URL:', formattedRequest.url);
-                console.log('[BACKGROUND] Method:', formattedRequest.method);
-
-                if (formattedRequest.cookieStr) {
-                    console.log('[BACKGROUND] Cookie string present for the matching request with length:', formattedRequest.cookieStr.length);
-                } else {
-                    console.log('[BACKGROUND] No cookie string found for the matching request!');
-                }
-
-                // Only log body type and length for privacy
-                console.log('[BACKGROUND] Body:',
-                    formattedRequest.body ?
-                        `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` :
-                        'No body for the matching request!');
-
-                // Wait for intercepted response with timeout
-                const interceptedResponse = await this.waitForInterceptedResponse(formattedRequest.url);
-                
-                if (interceptedResponse) {
-                    console.log('[BACKGROUND] Found intercepted response for this URL');
-                    formattedRequest.responseText = interceptedResponse.responseBody;
-
-                    console.log('[BACKGROUND] Response successfully obtained from interceptor:');
-                    console.log('[BACKGROUND] - Status:', interceptedResponse.responseStatus);
-                    console.log('[BACKGROUND] - Response body length:', interceptedResponse.responseBody.length);
-                } else {
-                    console.log('[BACKGROUND] No intercepted response found after waiting, falling back to replay request');
-                    // Fallback to the existing replay logic
-                    try {
-                        // Use a 1500ms delay for the initial request to avoid rate limiting
-                        const responseResult = await replayRequest(formattedRequest, true, 1500);
-
-                        // Add response body to the request object
-                        formattedRequest.responseText = responseResult.responseText;
-
-                        // Check if we got a rate limit or error response
-                        if (responseResult.status >= 400) {
-                            console.warn(`[BACKGROUND] Received error status: ${responseResult.status} - ${responseResult.statusText}`);
-                            if (responseResult.responseText.includes('429') || responseResult.responseText.includes('Too Many Requests')) {
-                                console.warn('[BACKGROUND] Rate limiting detected in response text');
-                            }
-                        }
-
-                        // Log response info
-                        console.log('[BACKGROUND] Response successfully obtained from replay:');
-                        console.log('[BACKGROUND] - Status:', responseResult.status);
-                        console.log('[BACKGROUND] - Content Type:', responseResult.contentType);
-                        console.log('[BACKGROUND] - Response body length:', responseResult.responseText.length);
-                    } catch (replayError) {
-                        console.error('[BACKGROUND] Failed to replay request:', replayError);
-                        // We continue even if replay fails - some providers may not require the response body
-                    }
-                }
-
-                console.log('[BACKGROUND] ==========================================');
-
-                // Generate and submit proof when we find a matching request
-                try {
-                    // Create claim object from the request and providerData
-                    const claimData = createClaimObject(formattedRequest, matchingCriteria, this.sessionId);
-
-                    // Clean up the map entries for this request
-                    this.requestHeadersMap.delete(requestId);
-                    this.requestBodyMap.delete(requestId);
-
-                    // Process the proof
-                    await this.generateAndSubmitProof(claimData);
-                } catch (error) {
-                    console.error('[BACKGROUND] Error processing matching request:', error);
-                }
-            }
-
-        } catch (error) {
-            console.error('[BACKGROUND] Error processing complete request:', error);
-        }
-    }
-
-    // Clean up old entries from request maps (older than 30 seconds)
-    cleanupRequestMaps() {
-        const now = Date.now();
-        const timeout = 30000; // 30 seconds
-
-        // Clean up requestHeadersMap
-        for (const [key, value] of this.requestHeadersMap.entries()) {
-            if (now - value.timestamp > timeout) {
-                this.requestHeadersMap.delete(key);
-            }
-        }
-
-        // Clean up requestBodyMap
-        for (const [key, value] of this.requestBodyMap.entries()) {
-            if (now - value.timestamp > timeout) {
-                this.requestBodyMap.delete(key);
-            }
-        }
-    }
-
-    // Clean up old entries from intercepted responses map (older than 1 minute)
-    cleanupInterceptedResponsesMap() {
-        const now = Date.now();
-        const timeout = 60000; // 1 minute
-
-        // Add timestamp to new entries if not already present
-        for (const [key, value] of this.interceptedResponsesMap.entries()) {
-            if (!value.timestamp) {
-                value.timestamp = now;
-                this.interceptedResponsesMap.set(key, value);
-            }
-            
-            if (now - value.timestamp > timeout) {
-                this.interceptedResponsesMap.delete(key);
-            }
-        }
-    }
-
-    async generateAndSubmitProof(claimData) {
+    async generateProofData(claimData, requestHash) {
         try {
             // Use the proof-generator utility which leverages offscreen document
             console.log('[BACKGROUND] Generating proof for claim data:', claimData);
 
             // Generate proof using offscreen document
+            // send a message to the content script to notify of the proof generation started
+            chrome.tabs.sendMessage(this.activeTabId, {
+                action: MESSAGE_ACTIONS.PROOF_GENERATION_STARTED,
+                source: MESSAGE_SOURCES.BACKGROUND,
+                target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                data: { requestHash: requestHash }
+            });
             const proof = await generateProof(claimData);
-
-            console.log('[BACKGROUND] Proof generated successfully:', proof);
-
-            // Submit the proof
-            // await this.submitProof(proof);
-
+            if (proof) {
+                // send a message to the content script to notify of the proof generation success
+                chrome.tabs.sendMessage(this.activeTabId, {
+                    action: MESSAGE_ACTIONS.PROOF_GENERATION_SUCCESS,
+                    source: MESSAGE_SOURCES.BACKGROUND,
+                    target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                    data: { requestHash: requestHash }
+                });
+            }
             return proof;
         } catch (error) {
             console.error('[BACKGROUND] Error generating or submitting proof:', error);
+            // send a message to the content script to notify of the proof generation failed    
+            chrome.tabs.sendMessage(this.activeTabId, {
+                action: MESSAGE_ACTIONS.PROOF_GENERATION_FAILED,
+                source: MESSAGE_SOURCES.BACKGROUND,
+                target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                data: { requestHash: requestHash }
+            });
             throw error;
         }
     }
 
-    async submitProof(proof) {
+    async submitProofs() {
         try {
-            // We need the current session data
-            if (!this.providerData) {
-                throw new Error('Provider data not available');
+            //    check if there are proofs to submit and are equal to the number of proofs in the generatedProofs map
+            if (this.generatedProofs.size === 0) {
+                console.log('[BACKGROUND] No proofs to submit');
+                return;
             }
 
-            const formattedProof = formatProof(proof, this.providerData);
-            await submitProofOnCallback([formattedProof], this.callbackUrl, this.sessionId);
-            console.log('[BACKGROUND] Proof submitted to callback URL:', this.callbackUrl);
+            if (this.generatedProofs.size !== this.providerData.requestData.length) {
+                console.log('[BACKGROUND] Number of proofs to submit does not match the number of proofs in the generatedProofs map');
+                return;
+            }
+
+            const formattedProofs = [];
+            // create an array of proofs
+            // TODO: match the proofs to the request data
+
+            // the generatedProofs map is a map of requestHash to an array of proofs and the requestData is present in each of the requestData array element. Match the requestHash and call format proof
+            for (const requestData of this.providerData.requestData) {
+                if (this.generatedProofs.has(requestData.requestHash)) {
+                    const proofs = this.generatedProofs.get(requestData.requestHash);
+                    const formattedProof = formatProof(proofs, requestData);
+                    formattedProofs.push(formattedProof);
+                }
+            }
+            
+            // submit the proofs
+            try {
+                await submitProofOnCallback(formattedProofs, this.callbackUrl, this.sessionId);
+            } catch (error) {
+                // send a message to the content script to notify of the proof submission failed
+                chrome.tabs.sendMessage(this.activeTabId, {
+                    action: MESSAGE_ACTIONS.PROOF_SUBMISSION_FAILED,
+                    source: MESSAGE_SOURCES.BACKGROUND,
+                    target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                    data: { error: error.message }
+                });
+                console.error('[BACKGROUND] Error submitting proof:', error);
+                throw error;
+            }
+
+            // send a message to the content script to notify of the proof submission success
+            chrome.tabs.sendMessage(this.activeTabId, {
+                action: MESSAGE_ACTIONS.PROOF_SUBMITTED,
+                source: MESSAGE_SOURCES.BACKGROUND,
+                target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+            });
+
             // Notify content script
             if (this.activeTabId) {
                 try {
                     await chrome.tabs.sendMessage(this.activeTabId, {
                         action: 'PROOF_SUBMITTED',
-                        data: { proof }
+                        data: { formattedProofs }
                     });
                     console.log('[BACKGROUND] Content script notified of proof submission');
                 } catch (error) {
@@ -737,61 +514,27 @@ class ReclaimExtensionManager {
                 }
             }
 
-            // Navigate back to the original tab and close the provider tab
+            // Navigate back to the original tab and close the provider tab after 3 seconds
             if (this.originalTabId) {
                 try {
+                    setTimeout(async () => {
                     await chrome.tabs.update(this.originalTabId, { active: true });
                     console.log('[BACKGROUND] Switched back to original tab:', this.originalTabId);
                     if (this.activeTabId) {
                         await chrome.tabs.remove(this.activeTabId);
                         console.log('[BACKGROUND] Closed provider tab:', this.activeTabId);
-                        this.activeTabId = null;
-                    }
-                    this.originalTabId = null; // Reset original tab ID
+                            this.activeTabId = null;
+                        }
+                        this.originalTabId = null; // Reset original tab ID
+                    }, 3000);
                 } catch (error) {
                     console.error('[BACKGROUND] Error navigating back or closing tab:', error);
                 }
             }
-
             return { success: true };
         } catch (error) {
             console.error('[BACKGROUND] Error submitting proof:', error);
             throw error;
-        }
-    }
-
-    async injectCustomScript(tabId, scriptContent) {
-        try {
-            // Send a message to the content script to inject the script
-            await chrome.tabs.sendMessage(tabId, {
-                action: 'INJECT_CUSTOM_SCRIPT',
-                data: { script: scriptContent }
-            });
-            console.log('Custom script injection requested via content script');
-        } catch (error) {
-            console.error('Error requesting script injection:', error);
-
-            // Fallback: Try to inject a script loader
-            try {
-                await chrome.scripting.executeScript({
-                    target: { tabId },
-                    func: (scriptText) => {
-                        // Create a blob URL for the script
-                        const blob = new Blob([scriptText], { type: 'application/javascript' });
-                        const url = URL.createObjectURL(blob);
-
-                        // Create and append a script tag with the blob URL
-                        const script = document.createElement('script');
-                        script.src = url;
-                        script.onload = () => URL.revokeObjectURL(url);
-                        document.head.appendChild(script);
-                    },
-                    args: [scriptContent]
-                });
-                console.log('Custom script injected via fallback method');
-            } catch (fallbackError) {
-                console.error('Fallback script injection failed:', fallbackError);
-            }
         }
     }
 }
