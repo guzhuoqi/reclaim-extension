@@ -324,11 +324,11 @@
 
         // Request middleware for capturing and sending requests to content script
         interceptor.addRequestMiddleware(async (request) => {
-            // debug.info("Request:", {
-            //     url: request.url,
-            //     method: request.options.method,
-            //     headers: request.options.headers,
-            // });
+            debug.info("Request:", {
+                url: request.url,
+                method: request.options.method,
+                headers: request.options.headers,
+            });
             
             // Create a completely new object with only primitive values
             try {
@@ -400,11 +400,11 @@
 
         // Response middleware for capturing and sending responses to content script
         interceptor.addResponseMiddleware(async (response, request) => {
-            // debug.info("Response:", {
-            //     url: request.url,
-            //     status: response.status,
-            //     body: response.body,
-            // });
+            debug.info("Response:", {
+                url: request.url,
+                status: response.status,
+                body: response.body,
+            });
 
 
             // Create a completely new object with only primitive values

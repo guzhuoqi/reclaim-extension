@@ -15,12 +15,11 @@ class ReclaimExtensionManager {
         this.sessionId = null;
         this.callbackUrl = null;
         this.originalTabId = null;
-
+        this.managedTabs = new Set(); // Track tabs opened by the background script
 
         // Map to store generated proofs by session ID
         this.generatedProofs = new Map();
         this.filteredRequests = new Map();
-
 
         // Map to store popup messages for content script
         this.initPopupMessage = new Map();
@@ -33,6 +32,14 @@ class ReclaimExtensionManager {
     async init() {
         // Register message handler
         chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
+        
+        // Listen for tab removals to clean up our managedTabs set
+        chrome.tabs.onRemoved.addListener((tabId) => {
+            if (this.managedTabs.has(tabId)) {
+                this.managedTabs.delete(tabId);
+                console.log(`[BACKGROUND] Removed tab ${tabId} from managed tabs list`);
+            }
+        });
     }
 
     async handleMessage(message, sender, sendResponse) {
@@ -45,9 +52,20 @@ class ReclaimExtensionManager {
                 case MESSAGE_ACTIONS.CONTENT_SCRIPT_LOADED:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log(`[BACKGROUND] Content script loaded in tab ${sender.tab?.id} for URL: ${data.url}`);
+                        
+                        // Check if this tab is managed by us
+                        const isManaged = sender.tab?.id && this.managedTabs.has(sender.tab.id);
+                        
+                        // Tell the content script whether it should initialize
+                        chrome.tabs.sendMessage(sender.tab.id, {
+                            action: MESSAGE_ACTIONS.SHOULD_INITIALIZE,
+                            source: MESSAGE_SOURCES.BACKGROUND,
+                            target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                            data: { shouldInitialize: isManaged }
+                        }).catch(err => console.error("[BACKGROUND] Error sending initialization status:", err));
 
                         // Check if there's a pending popup message for this tab
-                        if (sender.tab?.id && this.initPopupMessage && this.initPopupMessage.has(sender.tab.id)) {
+                        if (isManaged && this.initPopupMessage && this.initPopupMessage.has(sender.tab.id)) {
                             const pendingMessage = this.initPopupMessage.get(sender.tab.id);
                             console.log(`[BACKGROUND] Found pending popup message for tab ${sender.tab.id}. Sending now.`);
                             chrome.tabs.sendMessage(sender.tab.id, pendingMessage.message)
@@ -62,7 +80,7 @@ class ReclaimExtensionManager {
                         }
 
                         // Check if there is a pending provider data Message for this tab
-                        if (sender.tab?.id && this.providerDataMessage && this.providerDataMessage.has(sender.tab.id)) {
+                        if (isManaged && this.providerDataMessage && this.providerDataMessage.has(sender.tab.id)) {
                             const pendingMessage = this.providerDataMessage.get(sender.tab.id);
                             console.log(`[BACKGROUND] Found pending provider data message for tab ${sender.tab.id}. Sending now.`);
                             chrome.tabs.sendMessage(sender.tab.id, pendingMessage.message)
@@ -86,8 +104,9 @@ class ReclaimExtensionManager {
                 case MESSAGE_ACTIONS.REQUEST_PROVIDER_DATA:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log('[BACKGROUND] Content script requested provider data');
-                        // check if the provider data is availble and send it to the content script else send not available
-                        if (this.providerData && this.parameters && this.sessionId && this.callbackUrl) {
+                        // Only respond with provider data if this is a managed tab
+                        if (sender.tab?.id && this.managedTabs.has(sender.tab.id) && 
+                            this.providerData && this.parameters && this.sessionId && this.callbackUrl) {
                             sendResponse({
                                 success: true, data: {
                                     providerData: this.providerData,
@@ -97,8 +116,16 @@ class ReclaimExtensionManager {
                                 }
                             });
                         } else {
-                            sendResponse({ success: false, error: 'Provider data not available' });
+                            sendResponse({ success: false, error: 'Provider data not available or tab not managed' });
                         }
+                    }
+                    break;
+                    
+                // Handle check if tab is managed
+                case MESSAGE_ACTIONS.CHECK_IF_MANAGED_TAB:
+                    if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
+                        const isManaged = sender.tab?.id && this.managedTabs.has(sender.tab.id);
+                        sendResponse({ success: true, isManaged });
                     }
                     break;
 
@@ -153,6 +180,9 @@ class ReclaimExtensionManager {
                                     sendResponse({ success: false, error: chrome.runtime.lastError.message });
                                 } else {
                                     console.log('[BACKGROUND] Tab closed successfully:', sender.tab.id);
+                                    if (this.managedTabs.has(sender.tab.id)) {
+                                        this.managedTabs.delete(sender.tab.id);
+                                    }
                                     sendResponse({ success: true });
                                 }
                             });
@@ -250,6 +280,10 @@ class ReclaimExtensionManager {
             chrome.tabs.create({ url: providerUrl }, (tab) => {
                 console.log('[BACKGROUND] New tab created with ID:', tab.id);
                 this.activeTabId = tab.id;
+                
+                // Add this tab to our managed tabs list
+                this.managedTabs.add(tab.id);
+                console.log('[BACKGROUND] Added tab to managed tabs list:', tab.id);
 
                 const providerName = this.providerData?.name || 'Default Provider';
                 const description = this.providerData?.description || 'Default Description';
@@ -315,7 +349,6 @@ class ReclaimExtensionManager {
         }
     }
 
-
     // Get cookies for a specific URL
     async getCookiesForUrl(url) {
         try {
@@ -339,7 +372,6 @@ class ReclaimExtensionManager {
             return null;
         }
     }
-
 
     // Process a filtered request from content script
     async processFilteredRequest(request, criteria, sessionId) {
@@ -400,7 +432,6 @@ class ReclaimExtensionManager {
             if (!this.generatedProofs.has(requestHash)) {
                 this.generatedProofs.set(requestHash, proof);
             }
-
 
             // check if all the proofs are generated and then call submit proof
             if (this.generatedProofs.size === this.providerData.requestData.length) {

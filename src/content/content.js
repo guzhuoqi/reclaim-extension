@@ -3,12 +3,16 @@ import '../utils/polyfills';
 
 import { RECLAIM_SDK_ACTIONS, MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../utils/constants'; // Corrected import path assuming index.js exports them
 import { createProviderVerificationPopup } from './components/ProviderVerificationPopup';
-import { checkLoginStatus } from '../utils/login-monitor';
 import { filterRequest } from '../utils/claim-creator';
 
-// IMPORTANT: Inject the network interceptor immediately before any other code runs
-// This needs to be a global variable to prevent garbage collection
-const injectInterceptorScript = (function () {
+// Create a flag to track if we should initialize
+let shouldInitialize = false;
+let interceptorInjected = false;
+
+// Function to inject the network interceptor - will be called conditionally
+const injectNetworkInterceptor = function() {
+  if (interceptorInjected) return;
+  
   try {
     console.log('[CONTENT] Injecting network interceptor immediately');
     const script = document.createElement('script');
@@ -31,14 +35,17 @@ const injectInterceptorScript = (function () {
         document.documentElement.insertBefore(script, document.documentElement.firstChild);
         console.log('[CONTENT] Network interceptor injected with highest priority');
         injected = true;
+        interceptorInjected = true;
       } else if (document.head) {
         document.head.insertBefore(script, document.head.firstChild);
         console.log('[CONTENT] Network interceptor injected into document head');
         injected = true;
+        interceptorInjected = true;
       } else if (document) {
         document.appendChild(script);
         console.log('[CONTENT] Network interceptor injected into document');
         injected = true;
+        interceptorInjected = true;
       }
     };
 
@@ -65,11 +72,47 @@ const injectInterceptorScript = (function () {
     console.error('[CONTENT] Error injecting interceptor immediately:', e);
     return null;
   }
+};
+
+// On load, immediately check if this tab should be initialized
+(async function() {
+  try {
+    // Notify background script that content script is loaded
+    chrome.runtime.sendMessage({
+      action: MESSAGE_ACTIONS.CONTENT_SCRIPT_LOADED,
+      source: MESSAGE_SOURCES.CONTENT_SCRIPT,
+      target: MESSAGE_SOURCES.BACKGROUND,
+      data: { url: window.location.href }
+    });
+    
+    // Listen for the background script's response about initialization
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      const { action, data } = message;
+      
+      if (action === MESSAGE_ACTIONS.SHOULD_INITIALIZE) {
+        shouldInitialize = data.shouldInitialize;
+        
+        if (shouldInitialize) {
+          // If we should initialize, inject the interceptor immediately
+          injectNetworkInterceptor();
+          
+          // And initialize the content script
+          window.reclaimContentScript = new ReclaimContentScript();
+        }
+        
+        sendResponse({ success: true });
+      }
+      
+      return true;
+    });
+  } catch (e) {
+    console.error('[CONTENT] Error in initialization check:', e);
+  }
 })();
 
 class ReclaimContentScript {
   constructor() {
-    // The interceptor is already injected before this constructor runs
+    // The interceptor should be injected before this constructor runs
     this.init();
     this.verificationPopup = null;
     this.providerName = 'Emirates';
@@ -94,17 +137,15 @@ class ReclaimContentScript {
 
   init() {
     // Listen for messages from the background script
-    console.log('[CONTENT] ReclaimContentScript initialized. Listening for messages...');
+
+     // Listen for messages from the web page
+     window.addEventListener('message', this.handleWindowMessage.bind(this));
+
+    if(!shouldInitialize) {
+      return;
+    }
+
     chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-
-    // Notify background script that content script is loaded
-    chrome.runtime.sendMessage({
-      action: MESSAGE_ACTIONS.CONTENT_SCRIPT_LOADED,
-      source: MESSAGE_SOURCES.CONTENT_SCRIPT,
-      target: MESSAGE_SOURCES.BACKGROUND,
-      data: { url: window.location.href }
-    });
-
     // Request provider data from background script and store the response
     chrome.runtime.sendMessage({
       action: MESSAGE_ACTIONS.REQUEST_PROVIDER_DATA,
@@ -123,9 +164,7 @@ class ReclaimContentScript {
         console.log('[CONTENT] Provider Data not available');
       }
     });
-
-    // Listen for messages from the web page
-    window.addEventListener('message', this.handleWindowMessage.bind(this));
+   
   }
 
   handleMessage(message, sender, sendResponse) {
@@ -157,6 +196,10 @@ class ReclaimContentScript {
         }
         
         sendResponse({ success: true });
+        break;
+
+      case MESSAGE_ACTIONS.SHOULD_INITIALIZE:
+        // ignore this message since we already handle it in the initialization check
         break;
 
       case MESSAGE_ACTIONS.PROVIDER_DATA_READY:
