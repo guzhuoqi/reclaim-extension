@@ -566,6 +566,8 @@ class ReclaimContentScript {
         responseText: response.body
       };
 
+      console.log('[CONTENT] Formatted request:', formattedRequest);
+
       // Check against each criteria in provider data
       for (const criteria of this.providerData.requestData) {
         if (filterRequest(formattedRequest, criteria, this.parameters)) {

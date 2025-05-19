@@ -17,7 +17,7 @@ function getTemplateVariables(template) {
 }
 
 // Convert template to regex, substituting known parameters
-function convertTemplateToRegex(template, parameters = {}) {
+export function convertTemplateToRegex(template, parameters = {}) {
   // Escape special regex characters
   let escapedTemplate = escapeSpecialCharacters(template);
 
@@ -49,9 +49,26 @@ function convertTemplateToRegex(template, parameters = {}) {
 // Function to check if a request matches filtering criteria
 function matchesRequestCriteria(request, filterCriteria, parameters = {}) {
   // Check URL match
-  const urlRegex = new RegExp(filterCriteria.url);
-  if (!urlRegex.test(request.url)) {
-    return false;
+
+  // For exact match
+  if (filterCriteria.url === request.url) {
+    return true;
+  }
+
+  // For regex match
+  if (filterCriteria.urlType === 'REGEX') {
+    const urlRegex = new RegExp(convertTemplateToRegex(filterCriteria.url, parameters).pattern);
+    if (!urlRegex.test(request.url)) {
+      return false;
+    }
+  }
+
+  // For template match
+  if (filterCriteria.urlType === 'TEMPLATE') {
+    const urlTemplate = new RegExp(convertTemplateToRegex(filterCriteria.url, parameters).pattern);
+    if (!urlTemplate.test(request.url)) {
+      return false;
+    }
   }
 
   // Check method match
@@ -110,10 +127,10 @@ export const filterRequest = (request, filterCriteria, parameters = {}) => {
       return false;
     }
 
-    // Then check if response matches (if we have response data)
-    if (request.responseText && filterCriteria.responseMatches) {
-      return matchesResponseCriteria(request.responseText, filterCriteria.responseMatches, parameters);
-    }
+    // // Then check if response matches (if we have response data)
+    // if (request.responseText && filterCriteria.responseMatches) {
+    //   return matchesResponseCriteria(request.responseText, filterCriteria.responseMatches, parameters);
+    // }
 
     return true;
   } catch (error) {

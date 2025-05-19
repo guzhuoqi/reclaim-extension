@@ -1,5 +1,4 @@
 import { 
-    extractDynamicParamNames, 
     extractParamsFromUrl, 
     extractParamsFromBody, 
     extractParamsFromResponse,
@@ -91,7 +90,7 @@ export const createClaimObject = async (request, providerData, sessionId) => {
     const secretParams = {};
     
     // Process URL
-    params.url = request.url;
+    params.url = providerData.urlType === 'TEMPLATE' ? providerData.url : request.url;
     params.method = request.method || 'GET';
     
     // Process headers - split between public and secret
@@ -118,8 +117,8 @@ export const createClaimObject = async (request, providerData, sessionId) => {
     } 
     
     // Process body if available
-    if (request.body) {
-        params.body = request.body;
+    if (providerData?.bodySniff?.enabled && request.body) {
+        params.body = providerData?.bodySniff?.template
     }
     
     // Process cookie string if available in request
@@ -128,45 +127,34 @@ export const createClaimObject = async (request, providerData, sessionId) => {
     } 
     
     // Extract dynamic parameters from various sources
-    const allParamValues = {};
+    let allParamValues = {};
     
     // 1. Extract params from URL if provider has URL template
-    if (providerData.urlTemplate && request.url) {
-        extractParamsFromUrl(providerData.urlTemplate, request.url, allParamValues);
+    if (providerData.urlType === 'TEMPLATE' && request.url) {
+        // append the extracted parameters to the existing allParamValues
+        allParamValues = { ...allParamValues, ...extractParamsFromUrl(providerData.url, request.url) };
     }
     
     // 2. Extract params from request body if provider has body template
-    if (providerData.bodyTemplate && request.body) {
-        extractParamsFromBody(providerData.bodyTemplate, request.body, allParamValues);
+
+    if (providerData?.bodySniff?.enabled && request.body) {
+        // append the extracted parameters to the existing allParamValues
+        allParamValues = { ...allParamValues, ...extractParamsFromBody(providerData.bodySniff.template, request.body) };
     }
     
     // 3. Extract params from response if available
     if (request.responseText && providerData.responseMatches) {
-        extractParamsFromResponse(
+        // append the extracted parameters to the existing allParamValues
+        allParamValues = { ...allParamValues, ...extractParamsFromResponse(
             request.responseText, 
             providerData.responseMatches, 
-            providerData.responseRedactions || [],
-            allParamValues
-        );
-        
-        // Log the extracted response parameters
-        console.log('[CLAIM-CREATOR] Extracted parameters from response:', 
-            Object.keys(allParamValues).join(', '));
-    }
-    
-    // 4. Add any pre-defined parameter values from providerData
-    if (providerData.paramValues) {
-        Object.entries(providerData.paramValues).forEach(([key, value]) => {
-            // Only add if not already extracted from request/response
-            if (!(key in allParamValues)) {
-                allParamValues[key] = value;
-            }
-        });
+            providerData.responseRedactions || []
+        ) };
     }
     
     // 5. Separate parameters into public and secret
     const { publicParams, secretParams: secretParamValues } = separateParams(allParamValues);
-    
+
     // Add parameter values to respective objects
     if (Object.keys(publicParams).length > 0) {
         params.paramValues = publicParams;
