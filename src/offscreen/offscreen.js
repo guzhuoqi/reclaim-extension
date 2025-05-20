@@ -82,7 +82,7 @@ class OffscreenProofGenerator {
               source: MESSAGE_SOURCES.OFFSCREEN,
               target: MESSAGE_SOURCES.BACKGROUND,
               success: true,
-              proof
+              proof: proof
             });
           })
           .catch(error => {
@@ -141,55 +141,11 @@ class OffscreenProofGenerator {
     }
     // extract sessionId from claimData
     const sessionId = claimData.sessionId;
-    // remove sessionId from claimData
+    // remove sessionId from claimData to avoid it being sent to the attestor
     delete claimData.sessionId;
-
-
-    // const claimDataTest = {
-    //   "name": "http",
-    //   "params": {
-    //     "url": "https://www.kaggle.com/api/i/users.UsersService/GetCurrentUser",
-    //     "method": "POST",
-    //     "headers": {
-    //       "sec-ch-ua": "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
-    //       "sec-ch-ua-mobile": "?0",
-    //       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-    //       "accept": "application/json"
-    //     },
-    //     "body": "{\"includeGroups\":false,\"includeLogins\":false,\"includeVerificationStatus\":true}",
-    //     "paramValues": {
-    //       "username": "providerreclaim"
-    //     },
-    //     "responseMatches": [
-    //       {
-    //         "value": "\"userName\":\"{{username}}\"",
-    //         "type": "contains",
-    //         "invert": false
-    //       }
-    //     ],
-    //     "responseRedactions": [
-    //       {
-    //         "jsonPath": "$.userName",
-    //         "regex": "\"userName\":\"(.*)\""
-    //       }
-    //     ]
-    //   },
-    //   "secretParams": {
-    //     "headers": {
-    //       "sec-ch-ua-platform": "\"macOS\"",
-    //       "x-xsrf-token": "CfDJ8KvMat0eHzhGoPokVBGB7D07t2JeXGqc6KZjg0Zew8_IQj-rU5s84yitRYG7Ewvx37-omtd9iULgQUFtezENS5HwianhfVomQWEyXib5CXqZBZd1XxUWm3PoyQ0CU0VKoceyqXZkGrZ_dTkh_ik9yZY",
-    //       "x-kaggle-build-version": "e9d43b45affe2bd2d0a835c6822f66cb286cee22",
-    //       "content-type": "application/json"
-    //     },
-    //     "cookieStr": "ACCEPTED_COOKIES=true; ka_sessionid=79120ad542d3ceb14fa2d3e0e5e31ede; __Host-KAGGLEID=CfDJ8HYJ4SW6YXhJj8CRciRldeRd6AxFXqXT0AKo4eUZslSWknzFMxvDrvxet3LI2ZFqZpzL2UkzHilhmolXHYoAiewKk-Bl90mAcSv70sEc5LkgVmYBKRHbDq31; CSRF-TOKEN=CfDJ8KvMat0eHzhGoPokVBGB7D1t3xozVQiO5HvaSaZFTwPRKUvR_ZJyLVxqJZCnSbuUB4wSURjkDNuDXbL_-Hxbt75HXqt6WBbkMG2zg5ICPQ; GCLB=CMeTlLrN8NjR2AEQAw; build-hash=e9d43b45affe2bd2d0a835c6822f66cb286cee22; XSRF-TOKEN=CfDJ8KvMat0eHzhGoPokVBGB7D07t2JeXGqc6KZjg0Zew8_IQj-rU5s84yitRYG7Ewvx37-omtd9iULgQUFtezENS5HwianhfVomQWEyXib5CXqZBZd1XxUWm3PoyQ0CU0VKoceyqXZkGrZ_dTkh_ik9yZY; CLIENT-TOKEN=eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJpc3MiOiJrYWdnbGUiLCJhdWQiOiJjbGllbnQiLCJzdWIiOiJwcm92aWRlcnJlY2xhaW0iLCJuYnQiOiIyMDI1LTA1LTA3VDEyOjMzOjQ3Ljg5MDgzMDBaIiwiaWF0IjoiMjAyNS0wNS0wN1QxMjozMzo0Ny44OTA4MzAwWiIsImp0aSI6IjVjYjVmN2Y2LWEzZGQtNDBhOC04MWYzLTA1ZWIxZTFkMGEwNyIsImV4cCI6IjIwMjUtMDYtMDdUMTI6MzM6NDcuODkwODMwMFoiLCJ1aWQiOjE2OTM1MjM5LCJkaXNwbGF5TmFtZSI6IlByb3ZpZGVyIFJlY2xhaW0iLCJlbWFpbCI6InByb3ZpZGVyc0BjcmVhdG9yb3MuY28iLCJ0aWVyIjoibm92aWNlIiwidmVyaWZpZWQiOmZhbHNlLCJwcm9maWxlVXJsIjoiL3Byb3ZpZGVycmVjbGFpbSIsInRodW1ibmFpbFVybCI6Imh0dHBzOi8vc3RvcmFnZS5nb29nbGVhcGlzLmNvbS9rYWdnbGUtYXZhdGFycy90aHVtYm5haWxzL2RlZmF1bHQtdGh1bWIucG5nIiwiZmYiOlsiQmF0Y2hJbXBvcnRLZXJuZWxzRnJvbUNvbGFiIiwiQ29tcGV0aXRpb25TaW11bGF0aW9uU2V0dGluZ3MiLCJLZXJuZWxzSW1wb3J0Tm90ZWJvb2tzIiwiQ29weU1vZGVsSW5zdGFuY2VWZXJzaW9uIiwiSGFja2F0aG9uQ29tcGV0aXRpb25zIiwiS2VybmVsc09wZW5JbkNvbGFiTG9jYWxVcmwiLCJNZXRhc3RvcmVDaGVja0FnZ3JlZ2F0ZUZpbGVIYXNoZXMiLCJCYWRnZXMiLCJVc2VyTGljZW5zZUFncmVlbWVudFN0YWxlbmVzc1RyYWNraW5nIiwiV3JpdGVVcHMiLCJBZG1pbk9ubHlPcmdhbml6YXRpb25DcmVhdGlvbiIsIk5ld09yZ2FuaXphdGlvblJlcXVlc3RGb3JtIiwiR3JvdXBzIiwiR3JvdXBzSW50ZWdyYXRpb24iLCJFbmFibGVTcG90bGlnaHRDb21tdW5pdHlDb21wZXRpdGlvbnNTaGVsZiIsIktlcm5lbHNQYXlUb1NjYWxlIiwiS2VybmVsc1ByaXZhdGVQYWNrYWdlTWFuYWdlciIsIk5ld0FuZEV4Y2l0aW5nIiwiQWlEZXZlbG9wZXJXb3Jrc3BhY2VzIiwiTG9jYXRpb25TaGFyaW5nT3B0T3V0IiwiRGF0YXNldHNQYXJxdWV0U3VwcG9ydCIsIkZlYXR1cmVkTW9kZWxzU2hlbGYiLCJEYXRhc2V0UG9sYXJzRGF0YUxvYWRlciIsIktlcm5lbHNGaXJlYmFzZUxvbmdQb2xsaW5nIiwiS2VybmVsc0RyYWZ0VXBsb2FkQmxvYiIsIktlcm5lbHNTYXZlQ2VsbE91dHB1dCIsIkZyb250ZW5kRXJyb3JSZXBvcnRpbmciLCJBbGxvd0ZvcnVtQXR0YWNobWVudHMiLCJUZXJtc09mU2VydmljZUJhbm5lciIsIlJlZ2lzdHJhdGlvbk5ld3NFbWFpbFNpZ251cElzT3B0T3V0IiwiRGF0YXNldFVwbG9hZGVyRHVwbGljYXRlRGV0ZWN0aW9uIl0sImZmZCI6eyJNb2RlbElkc0FsbG93SW5mZXJlbmNlIjoiIiwiTW9kZWxJbmZlcmVuY2VQYXJhbWV0ZXJzIjoieyBcIm1heF90b2tlbnNcIjogMTI4LCBcInRlbXBlcmF0dXJlXCI6IDAuNCwgXCJ0b3Bfa1wiOiA1IH0iLCJTcG90bGlnaHRDb21tdW5pdHlDb21wZXRpdGlvbiI6IjkxMTk2LDkxNDUxLDkxNDQ4LDg5ODUwLDg4NjEyLDk0Njg5LDk3NTY5LDk4NDUwIiwiU3RzTWluRmlsZXMiOiI3NTAwMCIsIlN0c01pbkdiIjoiMSIsIkdldHRpbmdTdGFydGVkQ29tcGV0aXRpb25zIjoiMzEzNiw1NDA3LDg2NTE4LDM0Mzc3IiwiQ2xpZW50UnBjUmF0ZUxpbWl0UXBzIjoiNDAiLCJDbGllbnRScGNSYXRlTGltaXRRcG0iOiI1MDAiLCJBZGRGZWF0dXJlRmxhZ3NUb1BhZ2VMb2FkVGFnIjoiZGlzYWJsZWQiLCJLZXJuZWxFZGl0b3JBdXRvc2F2ZVRocm90dGxlTXMiOiIzMDAwMCIsIktlcm5lbHNMNEdwdUNvbXBzIjoiODYwMjMsODQ3OTUsODg5MjUsOTE0OTYiLCJGZWF0dXJlZENvbW11bml0eUNvbXBldGl0aW9ucyI6IjYwMDk1LDU0MDAwLDU3MTYzLDgwODc0LDgxNzg2LDgxNzA0LDgyNjExLDg1MjEwIiwiRW1lcmdlbmN5QWxlcnRCYW5uZXIiOiJ7fSIsIkNvbXBldGl0aW9uTWV0cmljVGltZW91dE1pbnV0ZXMiOiIzMCIsIktlcm5lbHNQYXlUb1NjYWxlUHJvUGx1c0dwdUhvdXJzIjoiMzAiLCJLZXJuZWxzUGF5VG9TY2FsZVByb0dwdUhvdXJzIjoiMTUiLCJEYXRhc2V0c1NlbmRQZW5kaW5nU3VnZ2VzdGlvbnNSZW1pbmRlcnNCYXRjaFNpemUiOiIxMDAifSwicGlkIjoia2FnZ2xlLTE2MTYwNyIsInN2YyI6IndlYi1mZSIsInNkYWsiOiJBSXphU3lBNGVOcVVkUlJza0pzQ1pXVnotcUw2NTVYYTVKRU1yZUUiLCJibGQiOiJlOWQ0M2I0NWFmZmUyYmQyZDBhODM1YzY4MjJmNjZjYjI4NmNlZTIyIn0."
-    //   },
-    //   "ownerPrivateKey": "0x1234567456789012345678901234567890123456789012345678901234567890",
-    //   "client": {
-    //     "url": "wss://attestor.reclaimprotocol.org/ws"
-    //   }
-    // };
     try {
-      console.log('[OFFSCREEN] Generating proof with data:', claimData);
+      console.log('[OFFSCREEN] Session ID:', sessionId);
+      console.log('[OFFSCREEN] Claim data:', claimData);
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_STARTED);
       const result = await createClaimOnAttestor(claimData);
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_SUCCESS);

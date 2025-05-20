@@ -6,12 +6,15 @@ import { fetchProviderData, updateSessionStatus, submitProofOnCallback } from '.
 import { RECLAIM_SESSION_STATUS, MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../utils/constants';
 import { generateProof, formatProof } from '../utils/proof-generator';
 import { createClaimObject } from '../utils/claim-creator';
+import { loggerService, LOG_TYPES } from '../utils/logger';
 
 class ReclaimExtensionManager {
     constructor() {
         this.activeTabId = null;
         this.providerData = null;
         this.parameters = null;
+        this.httpProviderId = null;
+        this.appId = null;
         this.sessionId = null;
         this.callbackUrl = null;
         this.originalTabId = null;
@@ -20,6 +23,10 @@ class ReclaimExtensionManager {
         // Map to store generated proofs by session ID
         this.generatedProofs = new Map();
         this.filteredRequests = new Map();
+
+        // Queue for proof generation to avoid race conditions
+        this.proofGenerationQueue = [];
+        this.isProcessingQueue = false;
 
         // Map to store popup messages for content script
         this.initPopupMessage = new Map();
@@ -104,9 +111,24 @@ class ReclaimExtensionManager {
                 case MESSAGE_ACTIONS.REQUEST_PROVIDER_DATA:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log('[BACKGROUND] Content script requested provider data');
+                        loggerService.log({
+                            message: 'Content script requested provider data',
+                            type: LOG_TYPES.BACKGROUND,
+                            sessionId: this.sessionId || 'unknown',
+                            providerId: this.httpProviderId || 'unknown',
+                            appId: this.appId || 'unknown'
+                        });
                         // Only respond with provider data if this is a managed tab
                         if (sender.tab?.id && this.managedTabs.has(sender.tab.id) && 
                             this.providerData && this.parameters && this.sessionId && this.callbackUrl) {
+                            
+                            loggerService.log({
+                                message: 'Sending the following provider data to content script: ' + JSON.stringify(this.providerData),
+                                type: LOG_TYPES.BACKGROUND,
+                                sessionId: this.sessionId || 'unknown',
+                                providerId: this.httpProviderId || 'unknown',
+                                appId: this.appId || 'unknown'
+                            });
                             sendResponse({
                                 success: true, data: {
                                     providerData: this.providerData,
@@ -133,6 +155,16 @@ class ReclaimExtensionManager {
                 case MESSAGE_ACTIONS.START_VERIFICATION:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log('[BACKGROUND] Starting verification with data:', data);
+
+                        loggerService.log({
+                            message: 'Starting a new verification with data: ' + JSON.stringify(data),
+                            type: LOG_TYPES.BACKGROUND,
+                            sessionId: data.sessionId || 'unknown',
+                            providerId: data.providerId || 'unknown',
+                            appId: data.applicationId || 'unknown'
+                        });
+
+                        loggerService.startFlushInterval();
                         // Store the original tab ID
                         if (sender.tab && sender.tab.id) {
                             this.originalTabId = sender.tab.id;
@@ -158,18 +190,30 @@ class ReclaimExtensionManager {
                     }
                     break;
 
-                // Handle generate proof response from offscreen document
-                case MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE:
-                    if (source === MESSAGE_SOURCES.OFFSCREEN && target === MESSAGE_SOURCES.BACKGROUND) {
-                        console.log('[BACKGROUND] Received proof generation response from offscreen document');
-                        // This message is handled by the proof-generator.js using the messageListener
-                        // Just acknowledge receipt here
-                        sendResponse({ success: true });
-                    } else {
-                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
-                        sendResponse({ success: false, error: 'Action not supported' });
-                    }
-                    break;
+                // // Handle generate proof response from offscreen document
+                // case MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE:
+                //     if (source === MESSAGE_SOURCES.OFFSCREEN && target === MESSAGE_SOURCES.BACKGROUND) {
+                //         console.log('[BACKGROUND] Received proof generation response from offscreen document');
+                //         // Store the generated proof in case we need it later
+                //         if (!this.generatedProofs.has(data.requestHash)) {
+                //             this.generatedProofs.set(data.requestHash, data.proof);
+                //         }
+
+                //         // Process the next item in the queue if available
+                //         this.processNextQueueItem();
+
+                //         // check if all the proofs are generated and then call submit proof
+                //         if (this.generatedProofs.size === this.providerData.requestData.length) {
+                //             await this.submitProofs();
+                //         }
+                //         // This message is handled by the proof-generator.js using the messageListener
+                //         // Just acknowledge receipt here
+                //         sendResponse({ success: true });
+                //     } else {
+                //         console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                //         sendResponse({ success: false, error: 'Action not supported' });
+                //     }
+                //     break;
 
                 case MESSAGE_ACTIONS.CLOSE_CURRENT_TAB:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
@@ -200,7 +244,6 @@ class ReclaimExtensionManager {
                 case MESSAGE_ACTIONS.FILTERED_REQUEST_FOUND:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log('[BACKGROUND] Received filtered request from content script');
-
                         // check if the request is already in the filteredRequests map
                         if (this.filteredRequests.has(data.criteria.requestHash)) {
                             console.log('[BACKGROUND] Request already in filteredRequests map');
@@ -244,6 +287,8 @@ class ReclaimExtensionManager {
             // clear all the member variables
             this.providerData = null;
             this.parameters = null;
+            this.httpProviderId = null;
+            this.appId = null;
             this.sessionId = null;
             this.callbackUrl = null;
             this.generatedProofs = new Map();
@@ -252,8 +297,23 @@ class ReclaimExtensionManager {
             this.providerDataMessage = new Map();
 
             // fetch provider data
-            const providerData = await fetchProviderData(templateData.providerId);
+            if (!templateData.providerId) {
+                throw new Error('Provider ID not found');
+            }
+            // fetch provider data from the backend
+            loggerService.log({
+                message: 'Fetching provider data from the backend for provider Id ' + templateData.providerId,
+                type: LOG_TYPES.BACKGROUND,
+                sessionId: templateData.sessionId || 'unknown',
+                providerId: templateData.providerId || 'unknown',
+                appId: templateData.applicationId || 'unknown'
+            });
+
+
+            const providerData = await fetchProviderData(templateData.providerId, templateData.sessionId, templateData.applicationId);
             this.providerData = providerData;
+            
+            this.httpProviderId = templateData.providerId;
             if (templateData.parameters) {
                 this.parameters = templateData.parameters;
             }
@@ -265,8 +325,10 @@ class ReclaimExtensionManager {
             if (templateData.sessionId) {
                 this.sessionId = templateData.sessionId;
             }
-
-            console.log('[BACKGROUND] Provider data:', providerData);
+            
+            if (templateData.applicationId) {
+                this.appId = templateData.applicationId;
+            }
 
             if (!providerData) {
                 throw new Error('Provider data not found');
@@ -280,6 +342,13 @@ class ReclaimExtensionManager {
             chrome.tabs.create({ url: providerUrl }, (tab) => {
                 console.log('[BACKGROUND] New tab created with ID:', tab.id);
                 this.activeTabId = tab.id;
+                loggerService.log({
+                    message: 'New tab created',
+                    type: LOG_TYPES.BACKGROUND,
+                    sessionId: templateData.sessionId || 'unknown',
+                    providerId: templateData.providerId || 'unknown',
+                    appId: templateData.applicationId || 'unknown'
+                });
                 
                 // Add this tab to our managed tabs list
                 this.managedTabs.add(tab.id);
@@ -330,7 +399,7 @@ class ReclaimExtensionManager {
                 }
 
                 // Update session status after tab creation
-                updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION)
+                updateSessionStatus(templateData.sessionId, RECLAIM_SESSION_STATUS.USER_STARTED_VERIFICATION, templateData.providerId, templateData.applicationId)
                     .then(() => {
                         console.log('[BACKGROUND] Session status updated');
                     })
@@ -378,6 +447,14 @@ class ReclaimExtensionManager {
         try {
             console.log('[BACKGROUND] Processing filtered request:', request.url);
 
+            loggerService.log({
+                message: `Received filtered request ${request.url} from content script for request hash: ${criteria.requestHash}`,
+                type: LOG_TYPES.BACKGROUND,
+                sessionId: this.sessionId || 'unknown',
+                providerId: this.httpProviderId || 'unknown',
+                appId: this.appId || 'unknown'
+            });
+
             // Get cookies for this specific URL
             const cookies = await this.getCookiesForUrl(request.url);
 
@@ -421,64 +498,102 @@ class ReclaimExtensionManager {
                     target: MESSAGE_SOURCES.CONTENT_SCRIPT,
                     data: { requestHash: criteria.requestHash }
                 });
+
+                // logs
+                loggerService.log({
+                    message: `Claim creation success for request hash: ${criteria.requestHash}`,
+                    type: LOG_TYPES.BACKGROUND,
+                    sessionId: this.sessionId || 'unknown',
+                    providerId: this.httpProviderId || 'unknown',
+                    appId: this.appId || 'unknown'
+                });
             }
 
-            // Generate proof for the claim
-            const proof = await this.generateProofData(claimData, criteria.requestHash);
-            console.log('[BACKGROUND] Proof generated successfully:', proof);
+            // Add proof generation task to the queue instead of generating immediately
+            this.addToProofGenerationQueue(claimData, criteria.requestHash);
 
-            const requestHash = criteria.requestHash;
-            // Store the generated proof in case we need it later
-            if (!this.generatedProofs.has(requestHash)) {
-                this.generatedProofs.set(requestHash, proof);
-            }
-
-            // check if all the proofs are generated and then call submit proof
-            if (this.generatedProofs.size === this.providerData.requestData.length) {
-                await this.submitProofs();
-            }
-
-            return { success: true, proof };
+            return { success: true, message: "Proof generation queued" };
         } catch (error) {
             console.error('[BACKGROUND] Error processing filtered request:', error);
             return { success: false, error: error.message };
         }
     }
 
-    async generateProofData(claimData, requestHash) {
-        try {
-            // Use the proof-generator utility which leverages offscreen document
-            console.log('[BACKGROUND] Generating proof for claim data:', claimData);
+    // Add proof generation task to queue
+    addToProofGenerationQueue(claimData, requestHash) {
+        console.log('[BACKGROUND] Adding proof generation task to queue for hash:', requestHash);
+        
+        // Add task to queue
+        this.proofGenerationQueue.push({
+            claimData,
+            requestHash
+        });
+        
+        // Start processing queue if not already processing
+        if (!this.isProcessingQueue) {
+            this.processNextQueueItem();
+        }
+    }
 
-            // Generate proof using offscreen document
-            // send a message to the content script to notify of the proof generation started
+    // Process next item in the proof generation queue
+    async processNextQueueItem() {
+        // If already processing or queue is empty, return
+        if (this.isProcessingQueue || this.proofGenerationQueue.length === 0) {
+            return;
+        }
+
+        try {
+            // Mark as processing
+            this.isProcessingQueue = true;
+            
+            // Get next task from queue
+            const task = this.proofGenerationQueue.shift();
+            console.log('[BACKGROUND] Processing next queued proof generation task for hash:', task.requestHash);
+            
+            // Generate proof for the claim
             chrome.tabs.sendMessage(this.activeTabId, {
                 action: MESSAGE_ACTIONS.PROOF_GENERATION_STARTED,
                 source: MESSAGE_SOURCES.BACKGROUND,
                 target: MESSAGE_SOURCES.CONTENT_SCRIPT,
-                data: { requestHash: requestHash }
+                data: { requestHash: task.requestHash }
             });
-            const proof = await generateProof(claimData);
+
+            // Generate proof using offscreen document
+            const proof = await generateProof(task.claimData);
+            console.log('[BACKGROUND] Return proof data from generateProof method in background:', proof);
+            
+            // Store the proof (will be handled in the MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE handler)
             if (proof) {
-                // send a message to the content script to notify of the proof generation success
+                if (!this.generatedProofs.has(task.requestHash)) {
+                    this.generatedProofs.set(task.requestHash, proof);
+                }
+                
+                // Notify content script
                 chrome.tabs.sendMessage(this.activeTabId, {
                     action: MESSAGE_ACTIONS.PROOF_GENERATION_SUCCESS,
                     source: MESSAGE_SOURCES.BACKGROUND,
                     target: MESSAGE_SOURCES.CONTENT_SCRIPT,
-                    data: { requestHash: requestHash }
+                    data: { requestHash: task.requestHash }
                 });
             }
-            return proof;
         } catch (error) {
-            console.error('[BACKGROUND] Error generating or submitting proof:', error);
-            // send a message to the content script to notify of the proof generation failed    
-            chrome.tabs.sendMessage(this.activeTabId, {
-                action: MESSAGE_ACTIONS.PROOF_GENERATION_FAILED,
-                source: MESSAGE_SOURCES.BACKGROUND,
-                target: MESSAGE_SOURCES.CONTENT_SCRIPT,
-                data: { requestHash: requestHash }
-            });
-            throw error;
+            console.error('[BACKGROUND] Error processing proof generation queue item:', error);
+            // If the current item in queue fails, try the next one
+            if (this.proofGenerationQueue.length > 0) {
+                this.isProcessingQueue = false;
+                this.processNextQueueItem();
+            }
+        } finally {
+            // Mark as no longer processing
+            this.isProcessingQueue = false;
+            
+            // If there are more items in queue, process the next one
+            if (this.proofGenerationQueue.length > 0) {
+                this.processNextQueueItem();
+            } else if (this.generatedProofs.size === this.providerData.requestData.length) {
+                // If all proofs are generated, submit them
+                this.submitProofs();
+            }
         }
     }
 
