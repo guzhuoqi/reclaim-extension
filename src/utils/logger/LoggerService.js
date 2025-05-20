@@ -143,22 +143,11 @@ export class LoggerService {
    * @returns {Promise<string>} The device ID.
    */
   async getDeviceLoggingId() {
-    // Create or retrieve a persistent device ID for logging
-    // in browser extension get a unique id for the device
 
-
-    return '123-test-id';
-    const { deviceId } = await chrome.storage.local.get('deviceId');
+    // generate a random unique id
+    const deviceId = crypto.randomUUID();
     
-    if (deviceId) {
-      return deviceId;
-    }
-    
-    // Generate a new UUID if not found
-    const newDeviceId = crypto.randomUUID();
-    await chrome.storage.local.set({ deviceId: newDeviceId });
-    
-    return newDeviceId;
+    return deviceId;
   }
 
   /**

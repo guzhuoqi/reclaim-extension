@@ -4,6 +4,7 @@ import '../utils/polyfills';
 import { RECLAIM_SDK_ACTIONS, MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../utils/constants'; // Corrected import path assuming index.js exports them
 import { createProviderVerificationPopup } from './components/ProviderVerificationPopup';
 import { filterRequest } from '../utils/claim-creator';
+import { loggerService, LOG_TYPES } from '../utils/logger';
 
 // Create a flag to track if we should initialize
 let shouldInitialize = false;
@@ -128,6 +129,8 @@ class ReclaimContentScript {
     this.providerData = null;
     this.parameters = null;
     this.sessionId = null;
+    this.httpProviderId = null;
+    this.appId = null;
     this.filteringInterval = null;
     this.filteringStartTime = null;
     this.filteredRequests = [];
@@ -157,6 +160,8 @@ class ReclaimContentScript {
         this.providerData = response.data.providerData;
         this.parameters = response.data.parameters;
         this.sessionId = response.data.sessionId;
+        this.httpProviderId = response.data.httpProviderId || 'unknown';
+        this.appId = response.data.appId || 'unknown';
         if(!this.isFiltering) {
           this.startNetworkFiltering();
         }
@@ -172,15 +177,6 @@ class ReclaimContentScript {
     console.log(`[CONTENT] Received message: Action: ${action}, Source: ${source}, Data:`, data);
 
     switch (action) {
-      case 'INJECT_CUSTOM_SCRIPT':
-        this.injectCustomScript(data.script);
-        sendResponse({ success: true });
-        break;
-
-      case 'EXTRACT_DOM_DATA':
-        const domData = this.extractDOMData(data.selectors);
-        sendResponse({ success: true, data: domData });
-        break;
 
       case 'PROOF_SUBMITTED':
         // Forward proof to the page
@@ -207,9 +203,19 @@ class ReclaimContentScript {
         this.providerData = data.providerData;
         this.parameters = data.parameters;
         this.sessionId = data.sessionId;
+        this.httpProviderId = data.httpProviderId || 'unknown';
+        this.appId = data.appId || 'unknown';
         if(!this.isFiltering) {
           this.startNetworkFiltering();
         }
+
+        loggerService.log({
+          message: 'Provider data received from background script and will proceed with network filtering.',
+          type: LOG_TYPES.CONTENT,
+          sessionId: this.sessionId,
+          providerId: this.httpProviderId,
+          appId: this.appId
+        });
         sendResponse({ success: true });
         break;
 
@@ -279,7 +285,13 @@ class ReclaimContentScript {
           console.log(`[CONTENT] Document already in state: ${document.readyState}. Executing appendPopupLogic directly.`);
           appendPopupLogic();
         }
-
+        loggerService.log({
+          message: 'Popup display process initiated and will proceed on DOM readiness.',
+          type: LOG_TYPES.CONTENT,
+          sessionId: this.sessionId,
+          providerId: this.httpProviderId,
+          appId: this.appId
+        });
         sendResponse({ success: true, message: 'Popup display process initiated and will proceed on DOM readiness.' });
         break;
 
@@ -396,6 +408,14 @@ class ReclaimContentScript {
     // Handle start verification request from SDK
     if (action === RECLAIM_SDK_ACTIONS.START_VERIFICATION && data) {
       // Forward the template data to background script
+      // log the message
+      loggerService.log({
+        message: 'Starting verification with data from SDK: ' + JSON.stringify(data),
+        type: LOG_TYPES.CONTENT,
+        sessionId: data.sessionId,
+        providerId: data.httpProviderId,
+        appId: data.applicationId
+      });
       chrome.runtime.sendMessage({
         action: MESSAGE_ACTIONS.START_VERIFICATION,
         source: MESSAGE_SOURCES.CONTENT_SCRIPT,
@@ -442,6 +462,13 @@ class ReclaimContentScript {
 
     // Store the request
     this.interceptedRequests.set(key, requestData);
+    loggerService.log({
+      message: `Intercepted request stored: ${requestData.method} ${requestData.url}`,
+      type: LOG_TYPES.CONTENT,
+      sessionId: this.sessionId,
+      providerId: this.httpProviderId,
+      appId: this.appId
+    });
     console.log(`[CONTENT] Stored intercepted request: ${requestData.method} ${requestData.url}`);
 
     // Clean up old requests only if we're still collecting
@@ -461,6 +488,13 @@ class ReclaimContentScript {
 
     // Store the response using URL as key
     this.interceptedResponses.set(responseData.url, responseData);
+    loggerService.log({
+      message: `Intercepted response stored: ${responseData.url}`,
+      type: LOG_TYPES.CONTENT,
+      sessionId: this.sessionId,
+      providerId: this.httpProviderId,
+      appId: this.appId
+    });
     console.log(`[CONTENT] Stored intercepted response for URL: ${responseData.url}`);
 
     // Clean up old responses only if we're still collecting
@@ -614,18 +648,25 @@ class ReclaimContentScript {
       // Check against each criteria in provider data
       for (const criteria of this.providerData.requestData) {
         if (filterRequest(formattedRequest, criteria, this.parameters)) {
-          console.log('[CONTENT] ==========================================');
-          console.log('[CONTENT] MATCHING REQUEST FOUND');
-          console.log('[CONTENT] URL:', formattedRequest.url);
-          console.log('[CONTENT] Method:', formattedRequest.method);
-          console.log('[CONTENT] Body:',
-            formattedRequest.body ?
-              `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` :
-              'No body for the matching request!');
-          console.log('[CONTENT] Response body length:', formattedRequest.responseText?.length);
-          console.log('[CONTENT] ==========================================');
+          // console.log('[CONTENT] ==========================================');
+          // console.log('[CONTENT] MATCHING REQUEST FOUND');
+          // console.log('[CONTENT] URL:', formattedRequest.url);
+          // console.log('[CONTENT] Method:', formattedRequest.method);
+          // console.log('[CONTENT] Body:',
+          //   formattedRequest.body ?
+          //     `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` :
+          //     'No body for the matching request!');
+          // console.log('[CONTENT] Response body length:', formattedRequest.responseText?.length);
+          // console.log('[CONTENT] ==========================================');
 
           // Mark this request as filtered
+          loggerService.log({
+            message: `Matching request found: ${formattedRequest.method} ${formattedRequest.url}`,
+            type: LOG_TYPES.CONTENT,
+            sessionId: this.sessionId,
+            providerId: this.httpProviderId,
+            appId: this.appId
+          });
           this.filteredRequests.push(key);
 
           // Send to background script for cookie fetching and claim creation
@@ -637,6 +678,13 @@ class ReclaimContentScript {
     // If we've found all possible matching requests, stop filtering
     if (this.filteredRequests.length >= this.providerData.requestData.length) {
       console.log('[CONTENT] Found all matching requests, stopping filtering and cleaning up resources');
+      loggerService.log({
+        message: 'Found all matching requests, stopping filtering and cleaning up resources',
+        type: LOG_TYPES.CONTENT,
+        sessionId: this.sessionId,
+        providerId: this.httpProviderId,
+        appId: this.appId
+      });
       
       // Stop filtering and prevent further storage
       this.stopStoringInterceptions = true;
@@ -664,6 +712,13 @@ class ReclaimContentScript {
 
   // Send filtered request to background script
   sendFilteredRequestToBackground(formattedRequest, matchingCriteria) {
+    loggerService.log({
+      message: 'Sending filtered request to background script: ' + JSON.stringify(formattedRequest.url),
+      type: LOG_TYPES.CONTENT,
+      sessionId: this.sessionId,
+      providerId: this.httpProviderId,
+      appId: this.appId
+    });
     chrome.runtime.sendMessage({
       action: MESSAGE_ACTIONS.FILTERED_REQUEST_FOUND,
       source: MESSAGE_SOURCES.CONTENT_SCRIPT,
@@ -678,54 +733,6 @@ class ReclaimContentScript {
     });
   }
 
-  injectCustomScript(scriptContent) {
-    try {
-      // Create a Blob containing the script content
-      const blob = new Blob([scriptContent], { type: 'application/javascript' });
-
-      // Create a URL for the Blob
-      const scriptURL = URL.createObjectURL(blob);
-
-      // Create a script element with the Blob URL
-      const script = document.createElement('script');
-      script.src = scriptURL;
-      script.onload = () => {
-        // Clean up by revoking the Blob URL after the script loads
-        URL.revokeObjectURL(scriptURL);
-      };
-
-      // Append the script to the document head
-      document.head.appendChild(script);
-
-      return true;
-    } catch (error) {
-      console.error('Error injecting script:', error);
-      return false;
-    }
-  }
-
-  extractDOMData(selectors) {
-    const result = {};
-
-    if (selectors && Array.isArray(selectors)) {
-      selectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector.query);
-        if (elements.length > 0) {
-          if (selector.multiple) {
-            result[selector.name] = Array.from(elements).map(el =>
-              selector.attribute ? el.getAttribute(selector.attribute) : el.textContent.trim()
-            );
-          } else {
-            result[selector.name] = selector.attribute ?
-              elements[0].getAttribute(selector.attribute) :
-              elements[0].textContent.trim();
-          }
-        }
-      });
-    }
-
-    return result;
-  }
 }
 
 // Initialize content script

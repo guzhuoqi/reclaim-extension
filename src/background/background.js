@@ -28,6 +28,16 @@ class ReclaimExtensionManager {
         this.proofGenerationQueue = [];
         this.isProcessingQueue = false;
 
+        // Timers for session and proof generation
+        this.sessionTimer = null;
+        this.proofTimer = null;
+        this.sessionTimerDuration = 30000; // 1 minute in milliseconds
+        this.proofTimerDuration = 30000; // 1 minute in milliseconds
+        this.firstRequestReceived = false;
+        this.sessionTimerPaused = false;
+        this.sessionTimerRemainingTime = 0;
+        this.sessionTimerStartTime = 0;
+
         // Map to store popup messages for content script
         this.initPopupMessage = new Map();
         this.providerDataMessage = new Map();
@@ -39,7 +49,7 @@ class ReclaimExtensionManager {
     async init() {
         // Register message handler
         chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-        
+
         // Listen for tab removals to clean up our managedTabs set
         chrome.tabs.onRemoved.addListener((tabId) => {
             if (this.managedTabs.has(tabId)) {
@@ -59,10 +69,10 @@ class ReclaimExtensionManager {
                 case MESSAGE_ACTIONS.CONTENT_SCRIPT_LOADED:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
                         console.log(`[BACKGROUND] Content script loaded in tab ${sender.tab?.id} for URL: ${data.url}`);
-                        
+
                         // Check if this tab is managed by us
                         const isManaged = sender.tab?.id && this.managedTabs.has(sender.tab.id);
-                        
+
                         // Tell the content script whether it should initialize
                         chrome.tabs.sendMessage(sender.tab.id, {
                             action: MESSAGE_ACTIONS.SHOULD_INITIALIZE,
@@ -119,9 +129,9 @@ class ReclaimExtensionManager {
                             appId: this.appId || 'unknown'
                         });
                         // Only respond with provider data if this is a managed tab
-                        if (sender.tab?.id && this.managedTabs.has(sender.tab.id) && 
+                        if (sender.tab?.id && this.managedTabs.has(sender.tab.id) &&
                             this.providerData && this.parameters && this.sessionId && this.callbackUrl) {
-                            
+
                             loggerService.log({
                                 message: 'Sending the following provider data to content script: ' + JSON.stringify(this.providerData),
                                 type: LOG_TYPES.BACKGROUND,
@@ -134,7 +144,9 @@ class ReclaimExtensionManager {
                                     providerData: this.providerData,
                                     parameters: this.parameters,
                                     sessionId: this.sessionId,
-                                    callbackUrl: this.callbackUrl
+                                    callbackUrl: this.callbackUrl,
+                                    httpProviderId: this.httpProviderId,
+                                    appId: this.appId
                                 }
                             });
                         } else {
@@ -142,7 +154,7 @@ class ReclaimExtensionManager {
                         }
                     }
                     break;
-                    
+
                 // Handle check if tab is managed
                 case MESSAGE_ACTIONS.CHECK_IF_MANAGED_TAB:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
@@ -172,7 +184,6 @@ class ReclaimExtensionManager {
                         }
                         const result = await this.startVerification(data);
                         sendResponse({ success: true, result });
-                        break;
                     } else {
                         console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
                         sendResponse({ success: false, error: 'Action not supported' });
@@ -189,31 +200,6 @@ class ReclaimExtensionManager {
                         sendResponse({ success: false, error: 'Action not supported' });
                     }
                     break;
-
-                // // Handle generate proof response from offscreen document
-                // case MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE:
-                //     if (source === MESSAGE_SOURCES.OFFSCREEN && target === MESSAGE_SOURCES.BACKGROUND) {
-                //         console.log('[BACKGROUND] Received proof generation response from offscreen document');
-                //         // Store the generated proof in case we need it later
-                //         if (!this.generatedProofs.has(data.requestHash)) {
-                //             this.generatedProofs.set(data.requestHash, data.proof);
-                //         }
-
-                //         // Process the next item in the queue if available
-                //         this.processNextQueueItem();
-
-                //         // check if all the proofs are generated and then call submit proof
-                //         if (this.generatedProofs.size === this.providerData.requestData.length) {
-                //             await this.submitProofs();
-                //         }
-                //         // This message is handled by the proof-generator.js using the messageListener
-                //         // Just acknowledge receipt here
-                //         sendResponse({ success: true });
-                //     } else {
-                //         console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
-                //         sendResponse({ success: false, error: 'Action not supported' });
-                //     }
-                //     break;
 
                 case MESSAGE_ACTIONS.CLOSE_CURRENT_TAB:
                     if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
@@ -296,6 +282,14 @@ class ReclaimExtensionManager {
             this.initPopupMessage = new Map();
             this.providerDataMessage = new Map();
 
+            // Reset timers and timer state variables
+            this.clearSessionTimer();
+            this.clearProofTimer();
+            this.firstRequestReceived = false;
+            this.sessionTimerPaused = false;
+            this.sessionTimerRemainingTime = 0;
+            this.sessionTimerStartTime = 0;
+
             // fetch provider data
             if (!templateData.providerId) {
                 throw new Error('Provider ID not found');
@@ -312,7 +306,7 @@ class ReclaimExtensionManager {
 
             const providerData = await fetchProviderData(templateData.providerId, templateData.sessionId, templateData.applicationId);
             this.providerData = providerData;
-            
+
             this.httpProviderId = templateData.providerId;
             if (templateData.parameters) {
                 this.parameters = templateData.parameters;
@@ -325,7 +319,7 @@ class ReclaimExtensionManager {
             if (templateData.sessionId) {
                 this.sessionId = templateData.sessionId;
             }
-            
+
             if (templateData.applicationId) {
                 this.appId = templateData.applicationId;
             }
@@ -349,7 +343,7 @@ class ReclaimExtensionManager {
                     providerId: templateData.providerId || 'unknown',
                     appId: templateData.applicationId || 'unknown'
                 });
-                
+
                 // Add this tab to our managed tabs list
                 this.managedTabs.add(tab.id);
                 console.log('[BACKGROUND] Added tab to managed tabs list:', tab.id);
@@ -378,7 +372,9 @@ class ReclaimExtensionManager {
                             providerData: this.providerData,
                             parameters: this.parameters,
                             sessionId: this.sessionId,
-                            callbackUrl: this.callbackUrl
+                            callbackUrl: this.callbackUrl,
+                            httpProviderId: this.httpProviderId,
+                            appId: this.appId
                         }
                     };
 
@@ -447,6 +443,12 @@ class ReclaimExtensionManager {
         try {
             console.log('[BACKGROUND] Processing filtered request:', request.url);
 
+            // Start session timer if this is the first request
+            if (!this.firstRequestReceived) {
+                this.firstRequestReceived = true;
+                this.startSessionTimer();
+            }
+
             loggerService.log({
                 message: `Received filtered request ${request.url} from content script for request hash: ${criteria.requestHash}`,
                 type: LOG_TYPES.BACKGROUND,
@@ -487,6 +489,9 @@ class ReclaimExtensionManager {
                     target: MESSAGE_SOURCES.CONTENT_SCRIPT,
                     data: { requestHash: criteria.requestHash }
                 });
+
+                // Fail entire session if claim creation fails
+                this.failSession("Claim creation failed: " + error.message);
                 return { success: false, error: error.message };
             }
 
@@ -501,7 +506,7 @@ class ReclaimExtensionManager {
 
                 // logs
                 loggerService.log({
-                    message: `Claim creation success for request hash: ${criteria.requestHash}`,
+                    message: `Claim Object creation successful for request hash: ${criteria.requestHash}`,
                     type: LOG_TYPES.BACKGROUND,
                     sessionId: this.sessionId || 'unknown',
                     providerId: this.httpProviderId || 'unknown',
@@ -515,6 +520,7 @@ class ReclaimExtensionManager {
             return { success: true, message: "Proof generation queued" };
         } catch (error) {
             console.error('[BACKGROUND] Error processing filtered request:', error);
+            this.failSession("Error processing request: " + error.message);
             return { success: false, error: error.message };
         }
     }
@@ -522,15 +528,17 @@ class ReclaimExtensionManager {
     // Add proof generation task to queue
     addToProofGenerationQueue(claimData, requestHash) {
         console.log('[BACKGROUND] Adding proof generation task to queue for hash:', requestHash);
-        
+
         // Add task to queue
         this.proofGenerationQueue.push({
             claimData,
             requestHash
         });
-        
+
         // Start processing queue if not already processing
         if (!this.isProcessingQueue) {
+            // Pause session timer while processing proofs
+            this.pauseSessionTimer();
             this.processNextQueueItem();
         }
     }
@@ -539,17 +547,22 @@ class ReclaimExtensionManager {
     async processNextQueueItem() {
         // If already processing or queue is empty, return
         if (this.isProcessingQueue || this.proofGenerationQueue.length === 0) {
+            // Resume session timer if queue is empty
+            if (this.proofGenerationQueue.length === 0) {
+                this.resumeSessionTimer();
+            }
             return;
         }
 
+        // Mark as processing
+        this.isProcessingQueue = true;
+
+        // Get next task from queue
+        const task = this.proofGenerationQueue.shift();
+
         try {
-            // Mark as processing
-            this.isProcessingQueue = true;
-            
-            // Get next task from queue
-            const task = this.proofGenerationQueue.shift();
             console.log('[BACKGROUND] Processing next queued proof generation task for hash:', task.requestHash);
-            
+
             // Generate proof for the claim
             chrome.tabs.sendMessage(this.activeTabId, {
                 action: MESSAGE_ACTIONS.PROOF_GENERATION_STARTED,
@@ -558,16 +571,37 @@ class ReclaimExtensionManager {
                 data: { requestHash: task.requestHash }
             });
 
+            // Start proof timer for this specific proof
+            this.startProofTimer(task.requestHash);
+
             // Generate proof using offscreen document
+            loggerService.log({
+                message: `Queued proof generation request for request hash: ${task.requestHash}`,
+                type: LOG_TYPES.BACKGROUND,
+                sessionId: this.sessionId || 'unknown',
+                providerId: this.httpProviderId || 'unknown',
+                appId: this.appId || 'unknown'
+            });
             const proof = await generateProof(task.claimData);
             console.log('[BACKGROUND] Return proof data from generateProof method in background:', proof);
-            
-            // Store the proof (will be handled in the MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE handler)
+
+            // Clear proof timer
+            this.clearProofTimer();
+
+            // Store the proof
             if (proof) {
                 if (!this.generatedProofs.has(task.requestHash)) {
                     this.generatedProofs.set(task.requestHash, proof);
                 }
-                
+
+                // log the proof generation success
+                loggerService.log({
+                    message: `Proof generation successful for request hash: ${task.requestHash}`,
+                    type: LOG_TYPES.BACKGROUND,
+                    sessionId: this.sessionId || 'unknown',
+                    providerId: this.httpProviderId || 'unknown',
+                    appId: this.appId || 'unknown'
+                });
                 // Notify content script
                 chrome.tabs.sendMessage(this.activeTabId, {
                     action: MESSAGE_ACTIONS.PROOF_GENERATION_SUCCESS,
@@ -575,26 +609,172 @@ class ReclaimExtensionManager {
                     target: MESSAGE_SOURCES.CONTENT_SCRIPT,
                     data: { requestHash: task.requestHash }
                 });
+
+                // Reset the session timer since we successfully generated a proof
+                this.resetSessionTimer();
             }
         } catch (error) {
             console.error('[BACKGROUND] Error processing proof generation queue item:', error);
-            // If the current item in queue fails, try the next one
-            if (this.proofGenerationQueue.length > 0) {
-                this.isProcessingQueue = false;
-                this.processNextQueueItem();
-            }
+            loggerService.logError({
+                error: `Proof generation failed for request hash: ${task.requestHash}`,
+                type: LOG_TYPES.BACKGROUND,
+                sessionId: this.sessionId || 'unknown',
+                providerId: this.httpProviderId || 'unknown',
+                appId: this.appId || 'unknown'
+            });
+            // Clear proof timer
+            this.clearProofTimer();
+
+            // Fail the entire session if any proof fails
+            this.failSession("Proof generation failed: " + error.message);
+            return;
         } finally {
             // Mark as no longer processing
             this.isProcessingQueue = false;
-            
+
             // If there are more items in queue, process the next one
             if (this.proofGenerationQueue.length > 0) {
                 this.processNextQueueItem();
-            } else if (this.generatedProofs.size === this.providerData.requestData.length) {
+            } else {
+                // Resume the session timer
+                this.resumeSessionTimer();
+
                 // If all proofs are generated, submit them
-                this.submitProofs();
+                if (this.generatedProofs.size === this.providerData.requestData.length) {
+                    // Clear all timers as we're done with all proofs
+                    this.clearAllTimers();
+                    this.submitProofs();
+                }
             }
         }
+    }
+
+    // Start session timer (1 minute)
+    startSessionTimer() {
+        console.log('[BACKGROUND] Starting session timer for 1 minute');
+        // Clear any existing timer
+        this.clearSessionTimer();
+
+        this.sessionTimerStartTime = Date.now();
+        this.sessionTimer = setTimeout(() => {
+            console.error('[BACKGROUND] Session timer expired: No proofs generated within 1 minute');
+            this.failSession("Session timeout: No proofs generated within 1 minute");
+        }, this.sessionTimerDuration);
+    }
+
+    // Reset session timer (called after successful proof generation)
+    resetSessionTimer() {
+        console.log('[BACKGROUND] Resetting session timer');
+        this.clearSessionTimer();
+        this.startSessionTimer();
+    }
+
+    // Clear session timer
+    clearSessionTimer() {
+        if (this.sessionTimer) {
+            clearTimeout(this.sessionTimer);
+            this.sessionTimer = null;
+        }
+    }
+
+    // Pause session timer while processing a proof
+    pauseSessionTimer() {
+        if (this.sessionTimer && !this.sessionTimerPaused) {
+            console.log('[BACKGROUND] Pausing session timer');
+            // Calculate remaining time
+            const elapsedTime = Date.now() - this.sessionTimerStartTime;
+            this.sessionTimerRemainingTime = Math.max(0, this.sessionTimerDuration - elapsedTime);
+
+            // Clear the current timer
+            this.clearSessionTimer();
+            this.sessionTimerPaused = true;
+        }
+    }
+
+    // Resume session timer after processing a proof
+    resumeSessionTimer() {
+        if (this.sessionTimerPaused) {
+            console.log('[BACKGROUND] Resuming session timer with remaining time:', this.sessionTimerRemainingTime);
+
+            this.sessionTimer = setTimeout(() => {
+                console.error('[BACKGROUND] Session timer expired: No proofs generated within 1 minute');
+                this.failSession("Session timeout: No proofs generated within 1 minute");
+            }, this.sessionTimerRemainingTime);
+
+            this.sessionTimerStartTime = Date.now() - (this.sessionTimerDuration - this.sessionTimerRemainingTime);
+            this.sessionTimerPaused = false;
+        }
+    }
+
+    // Start proof timer (3 minutes)
+    startProofTimer(requestHash) {
+        console.log('[BACKGROUND] Starting proof timer for 3 minutes for hash:', requestHash);
+        // Clear any existing proof timer
+        this.clearProofTimer();
+
+        this.proofTimer = setTimeout(() => {
+            console.error('[BACKGROUND] Proof timer expired: Proof generation took too long for hash:', requestHash);
+            this.failSession("Proof generation timeout: Proof generation took longer than 3 minutes");
+        }, this.proofTimerDuration);
+    }
+
+    // Clear proof timer
+    clearProofTimer() {
+        if (this.proofTimer) {
+            clearTimeout(this.proofTimer);
+            this.proofTimer = null;
+        }
+    }
+
+    // Fail the entire session with an error message
+    async failSession(errorMessage) {
+        console.error('[BACKGROUND] Failing session:', errorMessage);
+        loggerService.logError({
+            error: `Session failed: ${errorMessage}`,
+            type: LOG_TYPES.BACKGROUND,
+            sessionId: this.sessionId || 'unknown',
+            providerId: this.httpProviderId || 'unknown',
+            appId: this.appId || 'unknown'
+        });
+
+        // Clear all timers
+        this.clearSessionTimer();
+        this.clearProofTimer();
+
+        // Update session status to failed
+        if (this.sessionId) {
+            try {
+                await updateSessionStatus(this.sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_FAILED, this.httpProviderId, this.appId);
+            } catch (error) {
+                console.error('[BACKGROUND] Error updating session status to failed:', error);
+            }
+        }
+
+        // Notify content script about failure
+        if (this.activeTabId) {
+            chrome.tabs.sendMessage(this.activeTabId, {
+                action: MESSAGE_ACTIONS.SESSION_FAILED,
+                source: MESSAGE_SOURCES.BACKGROUND,
+                target: MESSAGE_SOURCES.CONTENT_SCRIPT,
+                data: { error: errorMessage }
+            }).catch(err => {
+                console.error('[BACKGROUND] Error notifying content script of session failure:', err);
+            });
+        }
+
+        // Clear the queue
+        this.proofGenerationQueue = [];
+        this.isProcessingQueue = false;
+    }
+
+    // Clear all timers (session and proof)
+    clearAllTimers() {
+        console.log('[BACKGROUND] Clearing all timers as all proofs are successfully generated');
+        this.clearSessionTimer();
+        this.clearProofTimer();
+        this.sessionTimerPaused = false;
+        this.sessionTimerRemainingTime = 0;
+        this.sessionTimerStartTime = 0;
     }
 
     async submitProofs() {
@@ -610,6 +790,9 @@ class ReclaimExtensionManager {
                 return;
             }
 
+            // Make sure all timers are cleared before submitting proofs
+            this.clearAllTimers();
+
             const formattedProofs = [];
             // create an array of proofs
             // TODO: match the proofs to the request data
@@ -624,10 +807,10 @@ class ReclaimExtensionManager {
             }
 
             console.log('[BACKGROUND] Formated proofs for submission: ', formattedProofs);
-            
+
             // submit the proofs
             try {
-                await submitProofOnCallback(formattedProofs, this.callbackUrl, this.sessionId);
+                await submitProofOnCallback(formattedProofs, this.callbackUrl, this.sessionId, this.httpProviderId, this.appId);
             } catch (error) {
                 // send a message to the content script to notify of the proof submission failed
                 chrome.tabs.sendMessage(this.activeTabId, {
@@ -664,11 +847,11 @@ class ReclaimExtensionManager {
             if (this.originalTabId) {
                 try {
                     setTimeout(async () => {
-                    await chrome.tabs.update(this.originalTabId, { active: true });
-                    console.log('[BACKGROUND] Switched back to original tab:', this.originalTabId);
-                    if (this.activeTabId) {
-                        await chrome.tabs.remove(this.activeTabId);
-                        console.log('[BACKGROUND] Closed provider tab:', this.activeTabId);
+                        await chrome.tabs.update(this.originalTabId, { active: true });
+                        console.log('[BACKGROUND] Switched back to original tab:', this.originalTabId);
+                        if (this.activeTabId) {
+                            await chrome.tabs.remove(this.activeTabId);
+                            console.log('[BACKGROUND] Closed provider tab:', this.activeTabId);
                             this.activeTabId = null;
                         }
                         this.originalTabId = null; // Reset original tab ID

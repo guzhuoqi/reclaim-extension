@@ -66,7 +66,7 @@ export const updateSessionStatus = async (sessionId, status, providerId, appId) 
 }
 
 
-export const submitProofOnCallback = async (proofs, submitUrl, sessionId) => {
+export const submitProofOnCallback = async (proofs, submitUrl, sessionId, providerId, appId) => {
     try {
         // 1. Convert the proofs array to a JSON string
         const jsonStringOfProofs = JSON.stringify(proofs);
@@ -84,9 +84,23 @@ export const submitProofOnCallback = async (proofs, submitUrl, sessionId) => {
             await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_SUBMISSION_FAILED);
             throw new Error('Failed to submit proof to Callback and update session status');
         }
+        loggerService.log({
+            message: 'Successfully submitted proof to Callback and updated session status',
+            type: LOG_TYPES.FETCH_DATA,
+            sessionId,
+            providerId,
+            appId
+        });
         await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_SUBMITTED);
         return res;
     } catch (error) {
+        loggerService.logError({
+            error: 'Error submitting proof to Callback: ' + error.toString(),
+            type: LOG_TYPES.FETCH_DATA,
+            sessionId,
+            providerId,
+            appId
+        });
         console.error('Error submitting proof to Callback:', error);
         throw error;
     }
