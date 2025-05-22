@@ -11,9 +11,9 @@ let shouldInitialize = false;
 let interceptorInjected = false;
 
 // Function to inject the network interceptor - will be called conditionally
-const injectNetworkInterceptor = function() {
+const injectNetworkInterceptor = function () {
   if (interceptorInjected) return;
-  
+
   try {
     console.log('[CONTENT] Injecting network interceptor immediately');
     const script = document.createElement('script');
@@ -76,7 +76,7 @@ const injectNetworkInterceptor = function() {
 };
 
 // On load, immediately check if this tab should be initialized
-(async function() {
+(async function () {
   try {
     // Notify background script that content script is loaded
     chrome.runtime.sendMessage({
@@ -85,25 +85,25 @@ const injectNetworkInterceptor = function() {
       target: MESSAGE_SOURCES.BACKGROUND,
       data: { url: window.location.href }
     });
-    
+
     // Listen for the background script's response about initialization
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { action, data } = message;
-      
+
       if (action === MESSAGE_ACTIONS.SHOULD_INITIALIZE) {
         shouldInitialize = data.shouldInitialize;
-        
+
         if (shouldInitialize) {
           // If we should initialize, inject the interceptor immediately
           injectNetworkInterceptor();
-          
+
           // And initialize the content script
           window.reclaimContentScript = new ReclaimContentScript();
         }
-        
+
         sendResponse({ success: true });
       }
-      
+
       return true;
     });
   } catch (e) {
@@ -139,10 +139,10 @@ class ReclaimContentScript {
   }
 
   init() {
-     // Listen for messages from the web page
-     window.addEventListener('message', this.handleWindowMessage.bind(this));
+    // Listen for messages from the web page
+    window.addEventListener('message', this.handleWindowMessage.bind(this));
 
-    if(!shouldInitialize) {
+    if (!shouldInitialize) {
       return;
     }
 
@@ -160,14 +160,14 @@ class ReclaimContentScript {
         this.sessionId = response.data.sessionId;
         this.httpProviderId = response.data.httpProviderId || 'unknown';
         this.appId = response.data.appId || 'unknown';
-        if(!this.isFiltering) {
+        if (!this.isFiltering) {
           this.startNetworkFiltering();
         }
       } else {
         console.log('[CONTENT] Provider Data not available');
       }
     });
-   
+
   }
 
   handleMessage(message, sender, sendResponse) {
@@ -183,12 +183,12 @@ class ReclaimContentScript {
           action: RECLAIM_SDK_ACTIONS.VERIFICATION_COMPLETED,
           data: data.proof
         }, '*');
-        
+
         // Update popup with success message
         if (this.verificationPopup) {
           this.verificationPopup.handleProofSubmitted();
         }
-        
+
         sendResponse({ success: true });
         break;
 
@@ -203,16 +203,16 @@ class ReclaimContentScript {
         this.sessionId = data.sessionId;
         this.httpProviderId = data.httpProviderId || 'unknown';
         this.appId = data.appId || 'unknown';
-        if(!this.isFiltering) {
+        if (!this.isFiltering) {
           this.startNetworkFiltering();
         }
 
         loggerService.log({
           message: 'Provider data received from background script and will proceed with network filtering.',
           type: LOG_TYPES.CONTENT,
-          sessionId: this.sessionId,
-          providerId: this.httpProviderId,
-          appId: this.appId
+          sessionId: data.sessionId,
+          providerId: data.httpProviderId,
+          appId: data.appId
         });
         sendResponse({ success: true });
         break;
@@ -232,7 +232,7 @@ class ReclaimContentScript {
         this.providerName = data?.providerName || this.providerName;
         this.description = data?.description || this.description;
         this.dataRequired = data?.dataRequired || this.dataRequired;
-       
+
 
         const appendPopupLogic = () => {
           if (!document.body) {
@@ -283,13 +283,16 @@ class ReclaimContentScript {
           console.log(`[CONTENT] Document already in state: ${document.readyState}. Executing appendPopupLogic directly.`);
           appendPopupLogic();
         }
-        loggerService.log({
-          message: 'Popup display process initiated and will proceed on DOM readiness.',
-          type: LOG_TYPES.CONTENT,
-          sessionId: this.sessionId,
-          providerId: this.httpProviderId,
-          appId: this.appId
-        });
+
+        if (this.appId && this.httpProviderId && this.sessionId) {
+          loggerService.log({
+            message: 'Popup display process initiated and will proceed on DOM readiness.',
+            type: LOG_TYPES.CONTENT,
+            sessionId: this.sessionId,
+            providerId: this.httpProviderId,
+            appId: this.appId
+          });
+        }
         sendResponse({ success: true, message: 'Popup display process initiated and will proceed on DOM readiness.' });
         break;
 
@@ -386,7 +389,7 @@ class ReclaimContentScript {
     if (action === MESSAGE_ACTIONS.INTERCEPTED_REQUEST && data) {
       // Store the intercepted request
       this.storeInterceptedRequest(data);
-      if(this.isFiltering) {
+      if (this.isFiltering) {
         this.startNetworkFiltering();
       }
     }
@@ -398,7 +401,7 @@ class ReclaimContentScript {
 
       // Try to link with the corresponding request
       this.linkRequestAndResponse(data.url, data);
-      if(this.isFiltering) {
+      if (this.isFiltering) {
         this.startNetworkFiltering();
       }
     }
@@ -460,14 +463,16 @@ class ReclaimContentScript {
 
     // Store the request
     this.interceptedRequests.set(key, requestData);
-    loggerService.log({
-      message: `Intercepted request stored: ${requestData.method} ${requestData.url}`,
-      type: LOG_TYPES.CONTENT,
-      sessionId: this.sessionId,
-      providerId: this.httpProviderId,
-      appId: this.appId
-    });
-    console.log(`[CONTENT] Stored intercepted request: ${requestData.method} ${requestData.url}`);
+    if (this.appId && this.httpProviderId && this.sessionId) {
+      loggerService.log({
+        message: `Intercepted request stored: ${requestData.method} ${requestData.url}`,
+        type: LOG_TYPES.CONTENT,
+        sessionId: this.sessionId,
+        providerId: this.httpProviderId,
+        appId: this.appId
+      });
+    }
+    // console.log(`[CONTENT] Stored intercepted request: ${requestData.method} ${requestData.url}`);
 
     // Clean up old requests only if we're still collecting
     if (!this.stopStoringInterceptions) {
@@ -486,14 +491,16 @@ class ReclaimContentScript {
 
     // Store the response using URL as key
     this.interceptedResponses.set(responseData.url, responseData);
-    loggerService.log({
-      message: `Intercepted response stored: ${responseData.url}`,
-      type: LOG_TYPES.CONTENT,
-      sessionId: this.sessionId,
-      providerId: this.httpProviderId,
-      appId: this.appId
-    });
-    console.log(`[CONTENT] Stored intercepted response for URL: ${responseData.url}`);
+    if (this.appId && this.httpProviderId && this.sessionId) {
+      loggerService.log({
+        message: `Intercepted response stored: ${responseData.url}`,
+        type: LOG_TYPES.CONTENT,
+        sessionId: this.sessionId,
+        providerId: this.httpProviderId,
+        appId: this.appId
+      });
+    }
+    // console.log(`[CONTENT] Stored intercepted response for URL: ${responseData.url}`);
 
     // Clean up old responses only if we're still collecting
     if (!this.stopStoringInterceptions) {
@@ -520,7 +527,7 @@ class ReclaimContentScript {
 
         // Store the linked data
         this.linkedRequestResponses.set(key, linkedData);
-        console.log(`[CONTENT] Linked request and response for URL: ${url}`);
+        // console.log(`[CONTENT] Linked request and response for URL: ${url}`);
         break;
       }
     }
@@ -570,7 +577,7 @@ class ReclaimContentScript {
     if (this.filteringInterval) {
       clearInterval(this.filteringInterval);
     }
-    
+
     // Then set up interval for continuous filtering
     this.filteringInterval = setInterval(() => {
       // Skip if we've already found all requests
@@ -578,7 +585,7 @@ class ReclaimContentScript {
         this.stopNetworkFiltering();
         return;
       }
-      
+
       this.filterInterceptedRequests();
 
       // Check for timeout (10 minutes)
@@ -592,21 +599,21 @@ class ReclaimContentScript {
   // Stop network filtering
   stopNetworkFiltering() {
     console.log('[CONTENT] Stopping network filtering and cleaning up resources');
-    
+
     // Clear the filtering interval
     if (this.filteringInterval) {
       clearInterval(this.filteringInterval);
       this.filteringInterval = null;
     }
-    
+
     // Stop filtering flag
     this.isFiltering = false;
-    
+
     // If we're stopping due to finding all requests, make sure we've properly 
     // set the flag to stop storing intercepted data
     if (this.filteredRequests.length >= (this.providerData?.requestData?.length || 0)) {
       this.stopStoringInterceptions = true;
-      
+
       // Clear stored data to free memory
       this.interceptedRequests.clear();
       this.interceptedResponses.clear();
@@ -620,7 +627,7 @@ class ReclaimContentScript {
       return;
     }
 
-    console.log('[CONTENT] Filtering intercepted requests...');
+    // console.log('[CONTENT] Filtering intercepted requests...');
 
     // For each linked request/response pair
     for (const [key, linkedData] of this.linkedRequestResponses.entries()) {
@@ -641,7 +648,7 @@ class ReclaimContentScript {
         responseText: response.body
       };
 
-      console.log('[CONTENT] Formatted request:', formattedRequest);
+      // console.log('[CONTENT] Formatted request:', formattedRequest);
 
       // Check against each criteria in provider data
       for (const criteria of this.providerData.requestData) {
@@ -658,6 +665,7 @@ class ReclaimContentScript {
           // console.log('[CONTENT] ==========================================');
 
           // Mark this request as filtered
+          
           loggerService.log({
             message: `Matching request found: ${formattedRequest.method} ${formattedRequest.url}`,
             type: LOG_TYPES.CONTENT,
@@ -683,17 +691,17 @@ class ReclaimContentScript {
         providerId: this.httpProviderId,
         appId: this.appId
       });
-      
+
       // Stop filtering and prevent further storage
       this.stopStoringInterceptions = true;
       this.isFiltering = false;
-      
+
       // Clear filtering interval
       if (this.filteringInterval) {
         clearInterval(this.filteringInterval);
         this.filteringInterval = null;
       }
-      
+
       // Clear any other intervals or timeouts related to request handling
       if (this.cleanupInterval) {
         clearInterval(this.cleanupInterval);
@@ -704,7 +712,7 @@ class ReclaimContentScript {
       this.interceptedRequests.clear();
       this.interceptedResponses.clear();
       this.linkedRequestResponses.clear();
-      console.log('[CONTENT] Cleared all stored intercepted requests and responses');
+      // console.log('[CONTENT] Cleared all stored intercepted requests and responses');
     }
   }
 
