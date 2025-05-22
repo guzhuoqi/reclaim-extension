@@ -74,8 +74,9 @@ class OffscreenProofGenerator {
 
       case MESSAGE_ACTIONS.GENERATE_PROOF:
         // Handle proof generation using createClaimOnAttestor
-        this.generateProof(data)
-          .then(proof => {
+        (async () => {
+          try {
+            const proof = await this.generateProof(data);
             console.log('[OFFSCREEN] Proof generated successfully');
             chrome.runtime.sendMessage({
               action: MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE,
@@ -84,8 +85,7 @@ class OffscreenProofGenerator {
               success: true,
               proof: proof
             });
-          })
-          .catch(error => {
+          } catch (error) {
             console.error('[OFFSCREEN] Error generating proof:', error);
             chrome.runtime.sendMessage({
               action: MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE,
@@ -94,7 +94,8 @@ class OffscreenProofGenerator {
               success: false,
               error: error.message || 'Unknown error in proof generation'
             });
-          });
+          }
+        })();
 
         // Respond immediately to keep the message channel open
         sendResponse({ received: true });
@@ -143,17 +144,41 @@ class OffscreenProofGenerator {
     const sessionId = claimData.sessionId;
     // remove sessionId from claimData to avoid it being sent to the attestor
     delete claimData.sessionId;
+    
     try {
       console.log('[OFFSCREEN] Session ID:', sessionId);
       console.log('[OFFSCREEN] Claim data:', claimData);
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_STARTED);
-      const result = await createClaimOnAttestor(claimData);
+      
+      // Create a variable to track if timeout occurred
+      let timeoutOccurred = false;
+      
+      // Create a promise that will be rejected after a timeout
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          timeoutOccurred = true;
+          reject(new Error('Proof generation timed out after 1 minute'));
+        }, 60000); // 1 minute timeout
+      });
+      
+      // Create a promise for the actual claim generation
+      const attestorPromise = createClaimOnAttestor(claimData);
+      
+      // Race the two promises - whichever completes first wins
+      const result = await Promise.race([attestorPromise, timeoutPromise]);
+      
+      // If execution reaches here, attestor was successful before timeout
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_SUCCESS);
       console.log('[OFFSCREEN] Claim created successfully:', result);
       return result;
     } catch (error) {
+      // Log the actual error
+      console.error('[OFFSCREEN] Proof generation failed:', error.message);
+      
+      // Update status to failed
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_FAILED);
-      console.error('[OFFSCREEN] Error generating claim:', error);
+      
+      // Rethrow the error to be handled by the caller
       throw error;
     }
   }

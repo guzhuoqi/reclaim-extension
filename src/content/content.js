@@ -139,8 +139,6 @@ class ReclaimContentScript {
   }
 
   init() {
-    // Listen for messages from the background script
-
      // Listen for messages from the web page
      window.addEventListener('message', this.handleWindowMessage.bind(this));
 

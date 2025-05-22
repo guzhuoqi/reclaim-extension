@@ -119,6 +119,76 @@ function matchesResponseCriteria(responseText, matchCriteria, parameters = {}) {
   return true;
 }
 
+// Function to check if response fields match responseRedactions criteria
+function matchesResponseFields(responseText, responseRedactions) {
+  if (!responseRedactions || responseRedactions.length === 0) {
+    return true;
+  }
+
+  // Try to parse JSON if the response appears to be JSON
+  let jsonData = null;
+  const isJson = responseText.trim().startsWith('{') || responseText.trim().startsWith('[');
+
+  if (isJson) {
+    try {
+      jsonData = JSON.parse(responseText);
+    } catch (e) {
+      console.warn("[NETWORK-FILTER] Response looks like JSON but couldn't be parsed");
+    }
+  }
+
+  // Check each redaction pattern
+  for (const redaction of responseRedactions) {
+    // If jsonPath is specified and response is JSON
+    if (redaction.jsonPath && jsonData) {
+      try {
+        const path = redaction.jsonPath.substring(2).split('.');
+        let value = jsonData;
+
+        for (const segment of path) {
+          if (value === undefined || value === null) return false;
+          value = value[segment];
+        }
+
+        // If we get here but value is undefined, the path doesn't exist
+        if (value === undefined) return false;
+      } catch (error) {
+        console.error(`[NETWORK-FILTER] Error checking jsonPath ${redaction.jsonPath}:`, error);
+        return false;
+      }
+    }
+    // If xPath is specified and response is not JSON (assumed to be HTML)
+    else if (redaction.xPath && !isJson) {
+      try {
+        // Simple XPath checking with regex
+        const cleanedXPath = redaction.xPath.replace(/^\/\//, '').replace(/\/@/, ' ');
+        const parts = cleanedXPath.split('/');
+        const element = parts[parts.length - 1];
+
+        // Check if the element exists in the HTML
+        const regex = new RegExp(`<${element}[^>]*>(.*?)<\/${element}>`, 'i');
+        if (!regex.test(responseText)) return false;
+      } catch (error) {
+        console.error(`[NETWORK-FILTER] Error checking xPath ${redaction.xPath}:`, error);
+        return false;
+      }
+    }
+    // If regex is specified
+    else if (redaction.regex) {
+      try {
+        const regex = new RegExp(redaction.regex);
+        if (!regex.test(responseText)) return false;
+      } catch (error) {
+        console.error(`[NETWORK-FILTER] Error checking regex ${redaction.regex}:`, error);
+        return false;
+      }
+    }
+  }
+
+  // All checks passed
+  return true;
+}
+
 // Main filtering function
 export const filterRequest = (request, filterCriteria, parameters = {}) => {
   try {
@@ -127,10 +197,19 @@ export const filterRequest = (request, filterCriteria, parameters = {}) => {
       return false;
     }
 
-    // // Then check if response matches (if we have response data)
-    // if (request.responseText && filterCriteria.responseMatches) {
-    //   return matchesResponseCriteria(request.responseText, filterCriteria.responseMatches, parameters);
-    // }
+    // Then check if response matches (if we have response data)
+    if (request.responseText && filterCriteria.responseMatches) {
+      if (!matchesResponseCriteria(request.responseText, filterCriteria.responseMatches, parameters)) {
+        return false;
+      }
+    }
+    
+    // Check if the response fields match the responseRedactions criteria
+    if (request.responseText && filterCriteria.responseRedactions) {
+      if (!matchesResponseFields(request.responseText, filterCriteria.responseRedactions)) {
+        return false;
+      }
+    }
 
     return true;
   } catch (error) {

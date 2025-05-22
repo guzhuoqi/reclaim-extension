@@ -7,6 +7,7 @@ import { RECLAIM_SESSION_STATUS, MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../uti
 import { generateProof, formatProof } from '../utils/proof-generator';
 import { createClaimObject } from '../utils/claim-creator';
 import { loggerService, LOG_TYPES } from '../utils/logger';
+import { SessionTimerManager } from '../utils/session-timer';
 
 class ReclaimExtensionManager {
     constructor() {
@@ -28,15 +29,15 @@ class ReclaimExtensionManager {
         this.proofGenerationQueue = [];
         this.isProcessingQueue = false;
 
-        // Timers for session and proof generation
-        this.sessionTimer = null;
-        this.proofTimer = null;
-        this.sessionTimerDuration = 30000; // 1 minute in milliseconds
-        this.proofTimerDuration = 30000; // 1 minute in milliseconds
         this.firstRequestReceived = false;
-        this.sessionTimerPaused = false;
-        this.sessionTimerRemainingTime = 0;
-        this.sessionTimerStartTime = 0;
+
+        // Initialize session timer manager
+        this.sessionTimerManager = new SessionTimerManager();
+        this.sessionTimerManager.setCallbacks(
+            this.failSession.bind(this)  // Session timeout callback
+        );
+        // Set timer duration (30 seconds for session timer)
+        this.sessionTimerManager.setTimerDuration(30000);
 
         // Map to store popup messages for content script
         this.initPopupMessage = new Map();
@@ -283,12 +284,8 @@ class ReclaimExtensionManager {
             this.providerDataMessage = new Map();
 
             // Reset timers and timer state variables
-            this.clearSessionTimer();
-            this.clearProofTimer();
+            this.sessionTimerManager.clearAllTimers();
             this.firstRequestReceived = false;
-            this.sessionTimerPaused = false;
-            this.sessionTimerRemainingTime = 0;
-            this.sessionTimerStartTime = 0;
 
             // fetch provider data
             if (!templateData.providerId) {
@@ -446,7 +443,7 @@ class ReclaimExtensionManager {
             // Start session timer if this is the first request
             if (!this.firstRequestReceived) {
                 this.firstRequestReceived = true;
-                this.startSessionTimer();
+                this.sessionTimerManager.startSessionTimer();
             }
 
             loggerService.log({
@@ -491,7 +488,7 @@ class ReclaimExtensionManager {
                 });
 
                 // Fail entire session if claim creation fails
-                this.failSession("Claim creation failed: " + error.message);
+                this.failSession("Claim creation failed: " + error.message, criteria.requestHash);
                 return { success: false, error: error.message };
             }
 
@@ -520,7 +517,7 @@ class ReclaimExtensionManager {
             return { success: true, message: "Proof generation queued" };
         } catch (error) {
             console.error('[BACKGROUND] Error processing filtered request:', error);
-            this.failSession("Error processing request: " + error.message);
+            this.failSession("Error processing request: " + error.message, criteria.requestHash);
             return { success: false, error: error.message };
         }
     }
@@ -538,7 +535,7 @@ class ReclaimExtensionManager {
         // Start processing queue if not already processing
         if (!this.isProcessingQueue) {
             // Pause session timer while processing proofs
-            this.pauseSessionTimer();
+            this.sessionTimerManager.pauseSessionTimer();
             this.processNextQueueItem();
         }
     }
@@ -549,7 +546,16 @@ class ReclaimExtensionManager {
         if (this.isProcessingQueue || this.proofGenerationQueue.length === 0) {
             // Resume session timer if queue is empty
             if (this.proofGenerationQueue.length === 0) {
-                this.resumeSessionTimer();
+                // Check if all proofs have been generated
+                if (this.generatedProofs.size === this.providerData.requestData.length) {
+                    // All proofs generated, clear all timers to prevent timeout
+                    console.log('[BACKGROUND] All proofs generated successfully, clearing timers');
+                    this.sessionTimerManager.clearAllTimers();
+                    // Schedule submission after clearing timers
+                    setTimeout(() => this.submitProofs(), 0);
+                    return;
+                }
+                this.sessionTimerManager.resumeSessionTimer();
             }
             return;
         }
@@ -571,9 +577,6 @@ class ReclaimExtensionManager {
                 data: { requestHash: task.requestHash }
             });
 
-            // Start proof timer for this specific proof
-            this.startProofTimer(task.requestHash);
-
             // Generate proof using offscreen document
             loggerService.log({
                 message: `Queued proof generation request for request hash: ${task.requestHash}`,
@@ -582,11 +585,15 @@ class ReclaimExtensionManager {
                 providerId: this.httpProviderId || 'unknown',
                 appId: this.appId || 'unknown'
             });
-            const proof = await generateProof(task.claimData);
-            console.log('[BACKGROUND] Return proof data from generateProof method in background:', proof);
+            const proofResponseObject = await generateProof(task.claimData);
+            // if proofResponseObject.success is false, then the fail the entire session
+            if (!proofResponseObject.success) {
+                this.failSession("Proof generation failed: " + proofResponseObject.error, task.requestHash);
+                return;
+            }
 
-            // Clear proof timer
-            this.clearProofTimer();
+            const proof = proofResponseObject.proof;
+            console.log('[BACKGROUND] Return proof data from generateProof method in background:', proof);
 
             // Store the proof
             if (proof) {
@@ -611,7 +618,7 @@ class ReclaimExtensionManager {
                 });
 
                 // Reset the session timer since we successfully generated a proof
-                this.resetSessionTimer();
+                this.sessionTimerManager.resetSessionTimer();
             }
         } catch (error) {
             console.error('[BACKGROUND] Error processing proof generation queue item:', error);
@@ -622,11 +629,9 @@ class ReclaimExtensionManager {
                 providerId: this.httpProviderId || 'unknown',
                 appId: this.appId || 'unknown'
             });
-            // Clear proof timer
-            this.clearProofTimer();
 
             // Fail the entire session if any proof fails
-            this.failSession("Proof generation failed: " + error.message);
+            this.failSession("Proof generation failed: " + error.message, task.requestHash);
             return;
         } finally {
             // Mark as no longer processing
@@ -636,98 +641,23 @@ class ReclaimExtensionManager {
             if (this.proofGenerationQueue.length > 0) {
                 this.processNextQueueItem();
             } else {
-                // Resume the session timer
-                this.resumeSessionTimer();
-
-                // If all proofs are generated, submit them
+                // Check if all proofs are generated before resuming session timer
                 if (this.generatedProofs.size === this.providerData.requestData.length) {
-                    // Clear all timers as we're done with all proofs
-                    this.clearAllTimers();
-                    this.submitProofs();
+                    // All proofs generated, clear all timers to prevent timeout
+                    console.log('[BACKGROUND] All proofs generated after processing queue, clearing timers');
+                    this.sessionTimerManager.clearAllTimers();
+                    // Schedule submission after clearing timers
+                    setTimeout(() => this.submitProofs(), 0);
+                } else {
+                    // Resume the session timer, still expecting more proofs
+                    this.sessionTimerManager.resumeSessionTimer();
                 }
             }
         }
     }
 
-    // Start session timer (1 minute)
-    startSessionTimer() {
-        console.log('[BACKGROUND] Starting session timer for 1 minute');
-        // Clear any existing timer
-        this.clearSessionTimer();
-
-        this.sessionTimerStartTime = Date.now();
-        this.sessionTimer = setTimeout(() => {
-            console.error('[BACKGROUND] Session timer expired: No proofs generated within 1 minute');
-            this.failSession("Session timeout: No proofs generated within 1 minute");
-        }, this.sessionTimerDuration);
-    }
-
-    // Reset session timer (called after successful proof generation)
-    resetSessionTimer() {
-        console.log('[BACKGROUND] Resetting session timer');
-        this.clearSessionTimer();
-        this.startSessionTimer();
-    }
-
-    // Clear session timer
-    clearSessionTimer() {
-        if (this.sessionTimer) {
-            clearTimeout(this.sessionTimer);
-            this.sessionTimer = null;
-        }
-    }
-
-    // Pause session timer while processing a proof
-    pauseSessionTimer() {
-        if (this.sessionTimer && !this.sessionTimerPaused) {
-            console.log('[BACKGROUND] Pausing session timer');
-            // Calculate remaining time
-            const elapsedTime = Date.now() - this.sessionTimerStartTime;
-            this.sessionTimerRemainingTime = Math.max(0, this.sessionTimerDuration - elapsedTime);
-
-            // Clear the current timer
-            this.clearSessionTimer();
-            this.sessionTimerPaused = true;
-        }
-    }
-
-    // Resume session timer after processing a proof
-    resumeSessionTimer() {
-        if (this.sessionTimerPaused) {
-            console.log('[BACKGROUND] Resuming session timer with remaining time:', this.sessionTimerRemainingTime);
-
-            this.sessionTimer = setTimeout(() => {
-                console.error('[BACKGROUND] Session timer expired: No proofs generated within 1 minute');
-                this.failSession("Session timeout: No proofs generated within 1 minute");
-            }, this.sessionTimerRemainingTime);
-
-            this.sessionTimerStartTime = Date.now() - (this.sessionTimerDuration - this.sessionTimerRemainingTime);
-            this.sessionTimerPaused = false;
-        }
-    }
-
-    // Start proof timer (3 minutes)
-    startProofTimer(requestHash) {
-        console.log('[BACKGROUND] Starting proof timer for 3 minutes for hash:', requestHash);
-        // Clear any existing proof timer
-        this.clearProofTimer();
-
-        this.proofTimer = setTimeout(() => {
-            console.error('[BACKGROUND] Proof timer expired: Proof generation took too long for hash:', requestHash);
-            this.failSession("Proof generation timeout: Proof generation took longer than 3 minutes");
-        }, this.proofTimerDuration);
-    }
-
-    // Clear proof timer
-    clearProofTimer() {
-        if (this.proofTimer) {
-            clearTimeout(this.proofTimer);
-            this.proofTimer = null;
-        }
-    }
-
     // Fail the entire session with an error message
-    async failSession(errorMessage) {
+    async failSession(errorMessage, requestHash) {
         console.error('[BACKGROUND] Failing session:', errorMessage);
         loggerService.logError({
             error: `Session failed: ${errorMessage}`,
@@ -738,8 +668,7 @@ class ReclaimExtensionManager {
         });
 
         // Clear all timers
-        this.clearSessionTimer();
-        this.clearProofTimer();
+        this.sessionTimerManager.clearAllTimers();
 
         // Update session status to failed
         if (this.sessionId) {
@@ -753,10 +682,10 @@ class ReclaimExtensionManager {
         // Notify content script about failure
         if (this.activeTabId) {
             chrome.tabs.sendMessage(this.activeTabId, {
-                action: MESSAGE_ACTIONS.SESSION_FAILED,
+                action: MESSAGE_ACTIONS.PROOF_GENERATION_FAILED,
                 source: MESSAGE_SOURCES.BACKGROUND,
                 target: MESSAGE_SOURCES.CONTENT_SCRIPT,
-                data: { error: errorMessage }
+                data: { requestHash: requestHash }
             }).catch(err => {
                 console.error('[BACKGROUND] Error notifying content script of session failure:', err);
             });
@@ -767,19 +696,13 @@ class ReclaimExtensionManager {
         this.isProcessingQueue = false;
     }
 
-    // Clear all timers (session and proof)
-    clearAllTimers() {
-        console.log('[BACKGROUND] Clearing all timers as all proofs are successfully generated');
-        this.clearSessionTimer();
-        this.clearProofTimer();
-        this.sessionTimerPaused = false;
-        this.sessionTimerRemainingTime = 0;
-        this.sessionTimerStartTime = 0;
-    }
-
     async submitProofs() {
         try {
-            //    check if there are proofs to submit and are equal to the number of proofs in the generatedProofs map
+            // Clear all timers immediately when starting the proof submission process
+            console.log('[BACKGROUND] Starting proof submission, clearing all timers');
+            this.sessionTimerManager.clearAllTimers();
+            
+            // Check if there are proofs to submit and are equal to the number of proofs in the generatedProofs map
             if (this.generatedProofs.size === 0) {
                 console.log('[BACKGROUND] No proofs to submit');
                 return;
@@ -789,9 +712,6 @@ class ReclaimExtensionManager {
                 console.log('[BACKGROUND] Number of proofs to submit does not match the number of proofs in the generatedProofs map');
                 return;
             }
-
-            // Make sure all timers are cleared before submitting proofs
-            this.clearAllTimers();
 
             const formattedProofs = [];
             // create an array of proofs
