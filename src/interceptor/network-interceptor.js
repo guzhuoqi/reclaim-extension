@@ -110,87 +110,135 @@
              * This method overrides the global fetch and XMLHttpRequest objects
              */
             setupInterceptor() {
-                // Setup Fetch interceptor
+                // Setup Fetch interceptor using a Proxy
                 const originalFetch = this.originalFetch;
-                window.fetch = async (url, options = {}) => {
-                    if (!url) {
-                        return originalFetch.call(window, url, options);
-                    }
+                const self = this;
 
-                    const requestData = {
+                // Create a proxy for the fetch function
+                window.fetch = new Proxy(originalFetch, {
+                    apply: async function (target, thisArg, argumentsList) {
+                        const [url, options = {}] = argumentsList;
+
+                        if (!url) {
+                            return Reflect.apply(target, thisArg, argumentsList);
+                        }
+
+                        const requestData = {
+                            url,
+                            options: {
+                                ...options,
+                                method: options.method || "GET",
+                                headers: options.headers || {},
+                            },
+                        };
+
+                        // Add a marker property to the request
+                        Object.defineProperty(requestData, "_rc", {
+                            value: true,
+                            enumerable: false,
+                            configurable: false,
+                            writable: false,
+                        });
+
+                        try {
+                            // Process request middlewares
+                            await Promise.all(
+                                self.requestMiddlewares.map((middleware) =>
+                                    middleware(requestData)
+                                )
+                            );
+                        } catch (error) {
+                            debug.error("Error in request middleware:", error);
+                        }
+
+                        // Make the actual fetch call with potentially modified data
+                        const response = await Reflect.apply(target, thisArg, [
+                            requestData.url,
+                            requestData.options,
+                        ]);
+
+                        // FIX: Don't create a prototype-chained response, use the original
+                        // Just mark it non-destructively
+                        if (!response._rc) {
+                            // Only mark it if not already marked
+                            try {
+                                Object.defineProperty(response, "_rc", {
+                                    value: true,
+                                    enumerable: false,
+                                    configurable: false,
+                                    writable: false,
+                                });
+                            } catch (e) {
+                                // In case the response is immutable, don't break the app
+                                debug.error("Could not mark response:", e);
+                            }
+                        }
+
+                        // Process response middlewares without blocking
+                        self
+                            .processResponseMiddlewares(response.clone(), requestData)
+                            .catch((error) => {
+                                debug.error("Error in response middleware:", error);
+                            });
+
+                        return response; // Return the original response object
+                    },
+                });
+
+                // Setup XHR interceptor by modifying the prototype
+                const originalOpen = XMLHttpRequest.prototype.open;
+                const originalSend = XMLHttpRequest.prototype.send;
+                const originalSetRequestHeader =
+                    XMLHttpRequest.prototype.setRequestHeader;
+
+                // Create a WeakMap to store request info for each XHR instance
+                const requestInfoMap = new WeakMap();
+
+                // Modify open method on prototype
+                XMLHttpRequest.prototype.open = function (...args) {
+                    // Mark this instance as intercepted
+                    Object.defineProperty(this, "_rc", {
+                        value: true,
+                        enumerable: false,
+                        configurable: false,
+                        writable: false,
+                    });
+
+                    const [method = "GET", url = ""] = args;
+                    const requestInfo = {
                         url,
                         options: {
-                            ...options,
-                            method: options.method || "GET",
-                            headers: options.headers || {},
-                        },
-                    };
-
-                    try {
-                        // Ensure all request middlewares complete before making the request
-                        await Promise.all(
-                            this.requestMiddlewares.map((middleware) => middleware(requestData))
-                        );
-                    } catch (error) {
-                        debug.error("Error in request middleware:", error);
-                        // If request middleware fails, proceed with original request
-                    }
-
-                    const response = await originalFetch(
-                        requestData.url,
-                        requestData.options
-                    );
-
-                    // Process response middlewares in the background without blocking
-                    this.processResponseMiddlewares(response.clone(), requestData).catch(
-                        (error) => {
-                            debug.error("Error in response middleware:", error);
-                        }
-                    );
-
-                    return response;
-                };
-
-                // Setup XHR interceptor
-                const self = this;
-                window.XMLHttpRequest = function () {
-                    const xhr = new self.originalXHR();
-                    const originalOpen = xhr.open;
-                    const originalSend = xhr.send;
-                    const originalSetRequestHeader = xhr.setRequestHeader;
-                    let requestInfo = {
-                        url: "",
-                        options: {
-                            method: "GET",
+                            method,
                             headers: {},
                             body: null,
                         },
                     };
 
-                    // Intercept and store request URL and method
-                    xhr.open = function (...args) {
-                        const [method = "GET", url = ""] = args;
-                        requestInfo.url = url;
-                        requestInfo.options.method = method;
-                        return originalOpen.apply(xhr, args);
-                    };
+                    // Store request info in WeakMap
+                    requestInfoMap.set(this, requestInfo);
 
-                    // Intercept and store request headers
-                    xhr.setRequestHeader = function (header, value) {
-                        if (header && value) {
-                            requestInfo.options.headers[header] = value;
-                        }
-                        return originalSetRequestHeader.apply(xhr, arguments);
-                    };
+                    // Call original method
+                    return originalOpen.apply(this, args);
+                };
 
-                    // Intercept send method to process request and response
-                    xhr.send = function (data) {
+                // Modify setRequestHeader method on prototype
+                XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
+                    const requestInfo = requestInfoMap.get(this);
+                    if (requestInfo && header && value) {
+                        requestInfo.options.headers[header] = value;
+                    }
+                    return originalSetRequestHeader.apply(this, arguments);
+                };
+
+                // Modify send method on prototype
+                XMLHttpRequest.prototype.send = function (data) {
+                    const requestInfo = requestInfoMap.get(this);
+                    if (requestInfo) {
                         requestInfo.options.body = data;
 
-                        // Create a promise to handle request middlewares
+                        // Process request middlewares
                         const runRequestMiddlewares = async () => {
                             try {
-                                // Ensure all request middlewares complete
                                 await Promise.all(
                                     self.requestMiddlewares.map((middleware) =>
                                         middleware(requestInfo)
@@ -198,22 +246,21 @@
                                 );
                             } catch (error) {
                                 debug.error("Error in request middleware:", error);
-                                // If request middleware fails, proceed with original request
                             }
                         };
 
-                        // Store the original onreadystatechange
-                        const originalHandler = xhr.onreadystatechange;
+                        // Store original onreadystatechange
+                        const originalHandler = this.onreadystatechange;
 
-                        xhr.onreadystatechange = function (event) {
-                            // Call original handler first
+                        // Override onreadystatechange
+                        this.onreadystatechange = function (event) {
                             if (typeof originalHandler === "function") {
-                                originalHandler.apply(xhr, arguments);
+                                originalHandler.apply(this, arguments);
                             }
 
-                            if (xhr.readyState === 4) {
-                                const status = xhr.status || 500;
-                                const statusText = xhr.statusText || "Request Failed";
+                            if (this.readyState === 4) {
+                                const status = this.status || 500;
+                                const statusText = this.statusText || "Request Failed";
 
                                 try {
                                     /**
@@ -258,43 +305,54 @@
                                         }
                                     };
 
-                                    const response = new Response(getResponseString(xhr.response), {
-                                        status: status,
-                                        statusText: statusText,
-                                        headers: new Headers(
-                                            Object.fromEntries(
-                                                (xhr.getAllResponseHeaders() || "")
-                                                    .split("\r\n")
-                                                    .filter(Boolean)
-                                                    .map((line) => line.split(": "))
-                                            )
-                                        ),
-                                    });
+                                    const responseObj = new Response(
+                                        getResponseString(this.response),
+                                        {
+                                            status: status,
+                                            statusText: statusText,
+                                            headers: new Headers(
+                                                Object.fromEntries(
+                                                    (this.getAllResponseHeaders() || "")
+                                                        .split("\r\n")
+                                                        .filter(Boolean)
+                                                        .map((line) => line.split(": "))
+                                                )
+                                            ),
+                                        }
+                                    );
 
-                                    Object.defineProperty(response, "url", {
+                                    Object.defineProperty(responseObj, "url", {
                                         value: requestInfo.url,
                                         writable: false,
                                     });
 
-                                    // Process response middlewares in the background without blocking
+                                    // Process response middlewares
                                     self
-                                        .processResponseMiddlewares(response, requestInfo)
-                                        .catch((error) => {
-                                            debug.error("Error in response middleware:", error);
-                                        });
+                                        .processResponseMiddlewares(responseObj, requestInfo)
+                                        .catch((error) =>
+                                            debug.error("Error in response middleware:", error)
+                                        );
                                 } catch (error) {
                                     debug.error("Error processing XHR response:", error);
                                 }
                             }
                         };
 
-                        // Run request middlewares and then send the request
+                        // Run middlewares then send
                         runRequestMiddlewares().then(() => {
-                            originalSend.call(xhr, requestInfo.options.body);
+                            originalSend.call(this, requestInfo.options.body);
                         });
-                    };
+                    } else {
+                        // Handle case where open wasn't called first
+                        originalSend.apply(this, arguments);
+                    }
+                };
 
-                    return xhr;
+                // Reset functionality to restore original methods if needed
+                this.resetXHRInterceptor = function () {
+                    XMLHttpRequest.prototype.open = originalOpen;
+                    XMLHttpRequest.prototype.send = originalSend;
+                    XMLHttpRequest.prototype.setRequestHeader = originalSetRequestHeader;
                 };
             }
 
@@ -476,6 +534,7 @@
         });
 
 
+
         /**
          * Expose the interceptor instance globally
          * This allows adding more middlewares from other scripts or the console
@@ -497,6 +556,7 @@
         debug.info(
             "Userscript initialized and ready - Access via window.reclaimInterceptor"
         );
-    }
+    };
+
     injectionFunction();
 })();
