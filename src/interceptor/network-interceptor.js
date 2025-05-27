@@ -424,11 +424,32 @@
                     debug.error("Error extracting body:", e);
                 }
                 
+                // Safely extract URL as a plain string
+                let urlStr = '';
+                try {
+                    if (typeof request.url === 'string') {
+                        urlStr = request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href;
+                    } else if (request.url && typeof request.url === 'object' && request.url.url) {
+                        // Handle Request object
+                        urlStr = request.url.url;
+                    } else if (request.url && typeof request.url === 'object' && request.url.href) {
+                        // Handle URL object
+                        urlStr = request.url.href;
+                    } else {
+                        // Fallback - try to get URL from the object
+                        urlStr = String(request.url);
+                        if (!urlStr.startsWith('http')) {
+                            urlStr = new URL(urlStr, window.location.origin).href;
+                        }
+                    }
+                } catch (e) {
+                    debug.error("Error extracting URL:", e);
+                    urlStr = window.location.href; // Fallback to current page URL
+                }
+                
                 // Create a simple, serializable object
                 const simpleRequest = {
-                    url: typeof request.url === 'string' ? 
-                        (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
-                        (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                    url: urlStr,
                     method: typeof request.options.method === 'string' ? request.options.method : 'GET',
                     headers: headersObj,
                     body: bodyStr
@@ -442,12 +463,25 @@
             } catch (error) {
                 debug.error("Error posting request data:", error);
                 // Send minimal data as fallback
+                let fallbackUrl = '';
+                try {
+                    if (typeof request.url === 'string') {
+                        fallbackUrl = request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href;
+                    } else if (request.url && typeof request.url === 'object' && request.url.url) {
+                        fallbackUrl = request.url.url;
+                    } else if (request.url && typeof request.url === 'object' && request.url.href) {
+                        fallbackUrl = request.url.href;
+                    } else {
+                        fallbackUrl = window.location.href;
+                    }
+                } catch (e) {
+                    fallbackUrl = window.location.href;
+                }
+                
                 window.postMessage({
                     action: 'INTERCEPTED_REQUEST',
                     data: {
-                        url: typeof request.url === 'string' ? 
-                            (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
-                            (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                        url: fallbackUrl,
                         method: typeof request.options.method === 'string' ? request.options.method : 'GET',
                         headers: {},
                         body: null
@@ -501,11 +535,32 @@
                     debug.error("Error extracting body:", e);
                 }
 
+                // Safely extract URL as a plain string
+                let urlStr = '';
+                try {
+                    if (typeof request.url === 'string') {
+                        urlStr = request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href;
+                    } else if (request.url && typeof request.url === 'object' && request.url.url) {
+                        // Handle Request object
+                        urlStr = request.url.url;
+                    } else if (request.url && typeof request.url === 'object' && request.url.href) {
+                        // Handle URL object
+                        urlStr = request.url.href;
+                    } else {
+                        // Fallback - try to get URL from the object
+                        urlStr = String(request.url);
+                        if (!urlStr.startsWith('http')) {
+                            urlStr = new URL(urlStr, window.location.origin).href;
+                        }
+                    }
+                } catch (e) {
+                    debug.error("Error extracting URL:", e);
+                    urlStr = window.location.href; // Fallback to current page URL
+                }
+
                 // Create a simple, serializable object
                 const simpleResponse = {
-                    url: typeof request.url === 'string' ? 
-                        (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
-                        (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                    url: urlStr,
                     status: response.status,
                     headers: headersObj,
                     body: bodyStr
@@ -519,12 +574,25 @@
             } catch (error) {
                 debug.error("Error posting response data:", error);
                 // Send minimal data as fallback
+                let fallbackUrl = '';
+                try {
+                    if (typeof request.url === 'string') {
+                        fallbackUrl = request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href;
+                    } else if (request.url && typeof request.url === 'object' && request.url.url) {
+                        fallbackUrl = request.url.url;
+                    } else if (request.url && typeof request.url === 'object' && request.url.href) {
+                        fallbackUrl = request.url.href;
+                    } else {
+                        fallbackUrl = window.location.href;
+                    }
+                } catch (e) {
+                    fallbackUrl = window.location.href;
+                }
+                
                 window.postMessage({
                     action: 'INTERCEPTED_RESPONSE',
                     data: {
-                        url: typeof request.url === 'string' ? 
-                            (request.url.startsWith('http') ? request.url : new URL(request.url, window.location.origin).href) : 
-                            (String(request.url).startsWith('http') ? String(request.url) : new URL(String(request.url), window.location.origin).href),
+                        url: fallbackUrl,
                         status: response.status,
                         headers: {},
                         body: null

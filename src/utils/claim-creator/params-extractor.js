@@ -185,9 +185,14 @@ export const extractParamsFromResponse = (responseText, responseMatches, respons
                         }
                     }
 
-                    // Store the extracted value
+                    // Store the extracted value as string
                     if (extractedValue !== null) {
-                        paramValues[paramNames[0]] = extractedValue;
+                        // Convert objects and arrays to JSON string, primitives to regular string
+                        if (typeof extractedValue === 'object' && extractedValue !== null) {
+                            paramValues[paramNames[0]] = JSON.stringify(extractedValue);
+                        } else {
+                            paramValues[paramNames[0]] = String(extractedValue);
+                        }
                     }
                 }
             }
@@ -195,11 +200,6 @@ export const extractParamsFromResponse = (responseText, responseMatches, respons
     } catch (error) {
         console.error("[PARAM-EXTRACTOR] Error extracting params from response:", error);
     }
-
-    // convert all the values in the paramValues to string
-    Object.keys(paramValues).forEach(key => {
-        paramValues[key] = paramValues[key].toString();
-    });
 
     return paramValues;
 };

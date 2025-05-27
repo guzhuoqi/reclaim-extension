@@ -421,17 +421,117 @@ class ReclaimExtensionManager {
 
             const urlObj = new URL(url);
             const domain = urlObj.hostname;
+            const protocol = urlObj.protocol;
+            const path = urlObj.pathname;
+            const isSecure = protocol === 'https:';
 
-            const cookies = await chrome.cookies.getAll({ domain });
-            if (cookies && cookies.length > 0) {
-                const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            console.log(`[BACKGROUND] Getting cookies for URL: ${url}, domain: ${domain}, path: ${path}, secure: ${isSecure}`);
+
+            // Get all cookies that would be sent with this request
+            const allCookies = [];
+            
+            // 1. Get cookies for the exact domain
+            const exactDomainCookies = await chrome.cookies.getAll({ domain });
+            allCookies.push(...exactDomainCookies);
+
+            // 2. Get cookies for parent domains (e.g., for subdomain.example.com, also get .example.com cookies)
+            const domainParts = domain.split('.');
+            for (let i = 1; i < domainParts.length; i++) {
+                const parentDomain = '.' + domainParts.slice(i).join('.');
+                try {
+                    const parentCookies = await chrome.cookies.getAll({ domain: parentDomain });
+                    allCookies.push(...parentCookies);
+                } catch (error) {
+                    console.warn(`[BACKGROUND] Could not get cookies for parent domain ${parentDomain}:`, error);
+                }
+            }
+
+            // 3. Get cookies by URL (this will respect path and secure restrictions)
+            try {
+                const urlCookies = await chrome.cookies.getAll({ url });
+                allCookies.push(...urlCookies);
+            } catch (error) {
+                console.warn(`[BACKGROUND] Could not get cookies by URL ${url}:`, error);
+            }
+
+            // Remove duplicates based on name, domain, and path
+            const uniqueCookies = [];
+            const cookieKeys = new Set();
+            
+            for (const cookie of allCookies) {
+                const key = `${cookie.name}|${cookie.domain}|${cookie.path}`;
+                if (!cookieKeys.has(key)) {
+                    // Check if this cookie should be sent with the request
+                    const shouldInclude = this.shouldIncludeCookie(cookie, urlObj);
+                    if (shouldInclude) {
+                        cookieKeys.add(key);
+                        uniqueCookies.push(cookie);
+                    }
+                }
+            }
+
+            if (uniqueCookies.length > 0) {
+                // Sort cookies by path length (longest first) and then by creation time
+                uniqueCookies.sort((a, b) => {
+                    if (a.path.length !== b.path.length) {
+                        return b.path.length - a.path.length;
+                    }
+                    return (a.creationDate || 0) - (b.creationDate || 0);
+                });
+
+                const cookieStr = uniqueCookies.map(c => `${c.name}=${c.value}`).join('; ');
+                console.log(`[BACKGROUND] Found ${uniqueCookies.length} cookies for URL ${url}`);
+                console.log(`[BACKGROUND] Cookie string length: ${cookieStr.length}`);
                 return cookieStr;
             }
 
+            console.log(`[BACKGROUND] No cookies found for URL: ${url}`);
             return null;
         } catch (error) {
             console.error('[BACKGROUND] Error getting cookies for URL:', error);
             return null;
+        }
+    }
+
+    // Helper method to determine if a cookie should be included in the request
+    shouldIncludeCookie(cookie, urlObj) {
+        try {
+            // Check domain match
+            const cookieDomain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
+            const requestDomain = urlObj.hostname;
+            
+            const domainMatches = requestDomain === cookieDomain || 
+                                 requestDomain.endsWith('.' + cookieDomain) ||
+                                 (cookie.domain.startsWith('.') && requestDomain.endsWith(cookie.domain.substring(1)));
+
+            if (!domainMatches) {
+                return false;
+            }
+
+            // Check path match
+            const cookiePath = cookie.path || '/';
+            const requestPath = urlObj.pathname;
+            const pathMatches = requestPath.startsWith(cookiePath);
+
+            if (!pathMatches) {
+                return false;
+            }
+
+            // Check secure flag
+            const isSecureRequest = urlObj.protocol === 'https:';
+            if (cookie.secure && !isSecureRequest) {
+                return false;
+            }
+
+            // Check if cookie is expired
+            if (cookie.expirationDate && cookie.expirationDate < Date.now() / 1000) {
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.warn('[BACKGROUND] Error checking cookie inclusion:', error);
+            return false;
         }
     }
 
