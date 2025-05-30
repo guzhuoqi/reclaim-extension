@@ -1,3 +1,6 @@
+// Import shared utility functions
+import { getValueFromJsonPath, getValueFromXPath, isJsonFormat, safeJsonParse } from './params-extractor-utils.js';
+
 // Escape special regex characters in string
 function escapeSpecialCharacters(input) {
   return input.replace(/[[\]()*+?.,\\^$|#]/g, '\\$&');
@@ -127,13 +130,11 @@ function matchesResponseFields(responseText, responseRedactions) {
 
   // Try to parse JSON if the response appears to be JSON
   let jsonData = null;
-  const isJson = responseText.trim().startsWith('{') || responseText.trim().startsWith('[');
+  const isJson = isJsonFormat(responseText);
 
   if (isJson) {
-    try {
-      jsonData = JSON.parse(responseText);
-    } catch (e) {
-      console.warn("[NETWORK-FILTER] Response looks like JSON but couldn't be parsed");
+    jsonData = safeJsonParse(responseText);
+    if (jsonData) {
     }
   }
 
@@ -142,16 +143,10 @@ function matchesResponseFields(responseText, responseRedactions) {
     // If jsonPath is specified and response is JSON
     if (redaction.jsonPath && jsonData) {
       try {
-        const path = redaction.jsonPath.substring(2).split('.');
-        let value = jsonData;
-
-        for (const segment of path) {
-          if (value === undefined || value === null) return false;
-          value = value[segment];
-        }
+        const value = getValueFromJsonPath(jsonData, redaction.jsonPath);
 
         // If we get here but value is undefined, the path doesn't exist
-        if (value === undefined) return false;
+        if (value === undefined || value === null) return false;
       } catch (error) {
         console.error(`[NETWORK-FILTER] Error checking jsonPath ${redaction.jsonPath}:`, error);
         return false;
@@ -160,14 +155,8 @@ function matchesResponseFields(responseText, responseRedactions) {
     // If xPath is specified and response is not JSON (assumed to be HTML)
     else if (redaction.xPath && !isJson) {
       try {
-        // Simple XPath checking with regex
-        const cleanedXPath = redaction.xPath.replace(/^\/\//, '').replace(/\/@/, ' ');
-        const parts = cleanedXPath.split('/');
-        const element = parts[parts.length - 1];
-
-        // Check if the element exists in the HTML
-        const regex = new RegExp(`<${element}[^>]*>(.*?)<\/${element}>`, 'i');
-        if (!regex.test(responseText)) return false;
+        const value = getValueFromXPath(responseText, redaction.xPath);
+        if (!value) return false;
       } catch (error) {
         console.error(`[NETWORK-FILTER] Error checking xPath ${redaction.xPath}:`, error);
         return false;
@@ -197,12 +186,14 @@ export const filterRequest = (request, filterCriteria, parameters = {}) => {
       return false;
     }
 
+
     // Then check if response matches (if we have response data)
     if (request.responseText && filterCriteria.responseMatches) {
       if (!matchesResponseCriteria(request.responseText, filterCriteria.responseMatches, parameters)) {
         return false;
       }
     }
+
     
     // Check if the response fields match the responseRedactions criteria
     if (request.responseText && filterCriteria.responseRedactions) {

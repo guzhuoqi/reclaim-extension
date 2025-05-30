@@ -636,16 +636,16 @@ class ReclaimContentScript {
         continue;
       }
 
-      const request = linkedData.request;
-      const response = linkedData.response;
+      const requestValue = linkedData.request;
+      const responseBody = linkedData.response.body;
 
       // Format request for filtering
       const formattedRequest = {
-        url: request.url,
-        method: request.method,
-        body: request.body || null,
-        headers: request.headers || {},
-        responseText: response.body
+        url: requestValue.url,
+        method: requestValue.method,
+        body: requestValue.body || null,
+        headers: requestValue.headers || {},
+        responseText: responseBody
       };
 
       // console.log('[CONTENT] Formatted request:', formattedRequest);
@@ -676,7 +676,7 @@ class ReclaimContentScript {
           this.filteredRequests.push(key);
 
           // Send to background script for cookie fetching and claim creation
-          this.sendFilteredRequestToBackground(formattedRequest, criteria);
+          this.sendFilteredRequestToBackground(formattedRequest, criteria, this.providerData.loginUrl);
         }
       }
     }
@@ -717,7 +717,7 @@ class ReclaimContentScript {
   }
 
   // Send filtered request to background script
-  sendFilteredRequestToBackground(formattedRequest, matchingCriteria) {
+  sendFilteredRequestToBackground(formattedRequest, matchingCriteria, loginUrl) {
     loggerService.log({
       message: 'Sending filtered request to background script: ' + JSON.stringify(formattedRequest.url),
       type: LOG_TYPES.CONTENT,
@@ -732,6 +732,7 @@ class ReclaimContentScript {
       data: {
         request: formattedRequest,
         criteria: matchingCriteria,
+        loginUrl: loginUrl,
         sessionId: this.sessionId
       }
     }, (response) => {

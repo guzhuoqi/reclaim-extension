@@ -1,5 +1,6 @@
 // Utility functions for parameter extraction from various sources
 import { convertTemplateToRegex } from './network-filter';
+import { getValueFromJsonPath, getValueFromXPath, isJsonFormat, safeJsonParse } from './params-extractor-utils.js';
 
 /**
  * Extract dynamic parameters from a string by matching {{PARAM_NAME}} patterns
@@ -71,59 +72,6 @@ export const extractParamsFromBody = (bodyTemplate, actualBody, paramValues = {}
 };
 
 /**
- * Extract values from JSON response using jsonPath
- * @param {Object} jsonData - Parsed JSON response
- * @param {string} jsonPath - JSONPath expression (e.g., $.userName)
- * @returns {any} Extracted value
- */
-const getValueFromJsonPath = (jsonData, jsonPath) => {
-    try {
-        // Simple JSONPath implementation
-        if (!jsonPath.startsWith('$')) return null;
-
-        const path = jsonPath.substring(2).split('.');
-        let value = jsonData;
-
-        for (const segment of path) {
-            if (value === undefined || value === null) return null;
-            value = value[segment];
-        }
-
-        return value;
-    } catch (error) {
-        console.error(`[PARAM-EXTRACTOR] Error extracting JSON value with path ${jsonPath}:`, error);
-        return null;
-    }
-};
-
-/**
- * Extract values from HTML response using XPath (simplified)
- * @param {string} htmlString - HTML string
- * @param {string} xPath - XPath expression
- * @returns {string|null} Extracted value
- */
-const getValueFromXPath = (htmlString, xPath) => {
-    // This is a simplified implementation
-    // For proper XPath parsing, a library would be needed
-    try {
-        // Extract with regex based on the xPath pattern
-        // This is a very basic implementation and won't work for all XPath expressions
-        const cleanedXPath = xPath.replace(/^\/\//, '').replace(/\/@/, ' ');
-        const parts = cleanedXPath.split('/');
-        const element = parts[parts.length - 1];
-
-        // Simple regex to find elements with content
-        const regex = new RegExp(`<${element}[^>]*>(.*?)<\/${element}>`, 'i');
-        const match = htmlString.match(regex);
-
-        return match ? match[1] : null;
-    } catch (error) {
-        console.error(`[PARAM-EXTRACTOR] Error extracting HTML value with XPath ${xPath}:`, error);
-        return null;
-    }
-};
-
-/**
  * Extract parameter values from response text using responseMatches and responseRedactions
  * @param {string} responseText - Response body text
  * @param {Array} responseMatches - Array of response match objects
@@ -137,14 +85,10 @@ export const extractParamsFromResponse = (responseText, responseMatches, respons
     try {
         // First, determine if the response is JSON or HTML
         let jsonData = null;
-        const isJson = responseText.trim().startsWith('{') || responseText.trim().startsWith('[');
+        const isJson = isJsonFormat(responseText);
 
         if (isJson) {
-            try {
-                jsonData = JSON.parse(responseText);
-            } catch (e) {
-                console.warn("[PARAM-EXTRACTOR] Response looks like JSON but couldn't be parsed");
-            }
+            jsonData = safeJsonParse(responseText);
         }
 
         // Process responseMatches to extract parameters

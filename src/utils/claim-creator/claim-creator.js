@@ -7,6 +7,21 @@ import {
 import { MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../constants';
 import { ensureOffscreenDocument } from '../offscreen-manager';
 
+// Generate Chrome Android user agent (adapted from reference code)
+const generateChromeAndroidUserAgent = (chromeMajorVersion = 135, isMobile = true) => {
+    if (chromeMajorVersion <= 0) {
+        chromeMajorVersion = 135;
+    }
+
+    const platform = "(Linux; Android 10; K)";
+    const engine = "AppleWebKit/537.36 (KHTML, like Gecko)";
+    const chromeVersionString = `Chrome/${chromeMajorVersion}.0.0.0`;
+    const mobileToken = isMobile ? " Mobile" : "";
+    const safariCompat = "Safari/537.36";
+
+    return `Mozilla/5.0 ${platform} ${engine} ${chromeVersionString}${mobileToken} ${safariCompat}`;
+};
+
 const getPrivateKeyFromOffscreen = () => {
     return new Promise((resolve, reject) => {
         // Timeout after 10 seconds
@@ -56,7 +71,7 @@ const getPrivateKeyFromOffscreen = () => {
     });
 };
 
-export const createClaimObject = async (request, providerData, sessionId) => {
+export const createClaimObject = async (request, providerData, sessionId, loginUrl) => {
     console.log('[CLAIM-CREATOR] Creating claim object from request data');
     
     // Ensure offscreen document is ready
@@ -69,6 +84,9 @@ export const createClaimObject = async (request, providerData, sessionId) => {
         // Depending on requirements, you might want to throw error or handle differently
         throw new Error(`Failed to initialize offscreen document: ${error.message}`);
     }
+    
+    // Generate appropriate user agent for the platform
+    const userAgent = await generateChromeAndroidUserAgent();
     
     // Define public headers that should be in params
     const PUBLIC_HEADERS = [
@@ -95,8 +113,16 @@ export const createClaimObject = async (request, providerData, sessionId) => {
     
     // Process headers - split between public and secret
     if (request.headers) {
-        const publicHeaders = {};
-        const secretHeaders = {};
+        console.log('request.headers: ', request.headers);
+        const publicHeaders = {
+            'Accept-Encoding': '*/*',
+            'Sec-Fetch-Mode': 'same-origin',
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': userAgent
+        };
+        const secretHeaders = {
+            'Referer': loginUrl ?? ''
+        };
         
         Object.entries(request.headers).forEach(([key, value]) => {
             const lowerKey = key.toLowerCase();

@@ -238,7 +238,7 @@ class ReclaimExtensionManager {
                         } else {
                             // Process the filtered request
                             this.filteredRequests.set(data.criteria.requestHash, data.request);
-                            const result = await this.processFilteredRequest(data.request, data.criteria, data.sessionId);
+                            const result = await this.processFilteredRequest(data.request, data.criteria, data.sessionId, data.loginUrl);
                             sendResponse({ success: true, result });
                         }
                     } else {
@@ -536,7 +536,7 @@ class ReclaimExtensionManager {
     }
 
     // Process a filtered request from content script
-    async processFilteredRequest(request, criteria, sessionId) {
+    async processFilteredRequest(request, criteria, sessionId, loginUrl) {
         try {
             console.log('[BACKGROUND] Processing filtered request:', request.url);
 
@@ -576,7 +576,7 @@ class ReclaimExtensionManager {
 
             let claimData = null;
             try {
-                claimData = await createClaimObject(request, criteria, sessionId);
+                claimData = await createClaimObject(request, criteria, sessionId, loginUrl);
             } catch (error) {
                 console.error('[BACKGROUND] Error creating claim object:', error);
                 // send a message to the content script to notify of the claim creation failed
