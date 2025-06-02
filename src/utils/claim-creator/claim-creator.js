@@ -115,7 +115,6 @@ export const createClaimObject = async (request, providerData, sessionId, loginU
     if (request.headers) {
         console.log('request.headers: ', request.headers);
         const publicHeaders = {
-            'Accept-Encoding': '*/*',
             'Sec-Fetch-Mode': 'same-origin',
             'Sec-Fetch-Site': 'same-origin',
             'User-Agent': userAgent
