@@ -369,15 +369,29 @@ class ReclaimContentScript {
     return true;
   }
 
+  checkExtensionId(extensionID) {
+    console.log('[CONTENT] Checking extension ID:', extensionID, 'vs', process.env.EXTENSION_ID);
+    if (!extensionID || extensionID !== process.env.EXTENSION_ID) {
+      console.log('[CONTENT] Message is not meant for this extension, ignoring...');
+      return false;
+    }
+    return true;
+  }
+
   handleWindowMessage(event) {
     // Only accept messages from the same window
     if (event.source !== window) return;
 
-    const { action, data, messageId } = event.data;
+    const { action, data, messageId, extensionID } = event.data;
+    
 
     // Check if the message is meant for this extension
     if (action === RECLAIM_SDK_ACTIONS.CHECK_EXTENSION) {
       // Send response back to the page
+      // check if extensionId is present and is the same as the one in the env file
+      if (!this.checkExtensionId(extensionID)) {
+        return;
+      }
       window.postMessage({
         action: RECLAIM_SDK_ACTIONS.EXTENSION_RESPONSE,
         messageId: messageId,
@@ -410,6 +424,9 @@ class ReclaimContentScript {
     if (action === RECLAIM_SDK_ACTIONS.START_VERIFICATION && data) {
       // Forward the template data to background script
       // log the message
+      if (!this.checkExtensionId(extensionID)) {
+        return;
+      }
       loggerService.log({
         message: 'Starting verification with data from SDK: ' + JSON.stringify(data),
         type: LOG_TYPES.CONTENT,

@@ -208,8 +208,9 @@ var options = {
     // expose and write the allowed env vars on the compiled bundle
     new webpack.EnvironmentPlugin(["NODE_ENV"]),
     new webpack.DefinePlugin({
-      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
-      'process.env.DEBUG': JSON.stringify(process.env.DEBUG || false)
+      'process.env.NODE_ENV': JSON.stringify(env.NODE_ENV),
+      'process.env.DEBUG': JSON.stringify(process.env.DEBUG || false),
+      'process.env.EXTENSION_ID': JSON.stringify(env.EXTENSION_ID)
     }),
     // Add NodePolyfillPlugin to handle Node.js polyfills
     new NodePolyfillPlugin(),
