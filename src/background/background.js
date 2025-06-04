@@ -58,6 +58,15 @@ class ReclaimExtensionManager {
                 console.log(`[BACKGROUND] Removed tab ${tabId} from managed tabs list`);
             }
         });
+
+        // Listen for navigation events to re-inject scripts
+        chrome.webNavigation.onCompleted.addListener((details) => {
+            // Only handle main frame navigations (not iframes)
+            if (details.frameId === 0 && this.managedTabs.has(details.tabId)) {
+                console.log(`[BACKGROUND] Navigation completed in managed tab ${details.tabId} to ${details.url}`);
+                this.injectProviderScriptForTab(details.tabId);
+            }
+        });
     }
 
     async handleMessage(message, sender, sendResponse) {
@@ -247,6 +256,16 @@ class ReclaimExtensionManager {
                     }
                     break;
 
+                // GET Current Tab Id
+                case MESSAGE_ACTIONS.GET_CURRENT_TAB_ID:
+                    if (source === MESSAGE_SOURCES.CONTENT_SCRIPT && target === MESSAGE_SOURCES.BACKGROUND) {
+                        sendResponse({ success: true, tabId: sender.tab?.id });
+                    } else {
+                        console.log(`[BACKGROUND] Message received: ${action} but invalid source or target`);
+                        sendResponse({ success: false, error: 'Action not supported' });
+                    }
+                    break;
+
                 default:
                     console.log('[BACKGROUND] Message received but not processed:', action);
                     sendResponse({ success: false, error: 'Action not supported' });
@@ -259,6 +278,7 @@ class ReclaimExtensionManager {
         // Required for async response
         return true;
     }
+
 
     async startVerification(templateData) {
         try {
@@ -344,6 +364,87 @@ class ReclaimExtensionManager {
                 // Add this tab to our managed tabs list
                 this.managedTabs.add(tab.id);
                 console.log('[BACKGROUND] Added tab to managed tabs list:', tab.id);
+
+                console.log('[BACKGROUND] Custom injection JS found, injecting into tab:', tab.id);
+
+                // Check if there's custom injection code in provider data
+                if (providerData.customInjection) {
+
+                    console.log('[BACKGROUND] Using custom injection code from provider data');
+
+                    const dynamicInjectFunction = function (customInjectStringValue) {
+                        try {
+                            console.log('[INJECTION] Successfully executing custom script');
+                            // Clean the injection code
+                            function convertStringToJS(injectionString) {
+                                const cleanedCode = injectionString
+                                    .replace(/\\n/g, '\n')           // Convert literal \n to newlines
+                                    .replace(/\\"/g, '"')            // Convert literal \" to quotes
+                                    .replace(/\\'/g, "'")            // Convert literal \' to quotes
+                                    .replace(/\\t/g, '\t')           // Convert literal \t to tabs
+                                    .trim();                         // Remove extra whitespace
+                                return cleanedCode;
+                            }
+
+                            const cleanedInjectionCode = convertStringToJS(customInjectStringValue);
+                            console.log('[INJECTION] Cleaned injection code:', cleanedInjectionCode);
+
+                            try {
+                                // execute
+                            } catch (error) {
+                                console.error("[INJECTION] Error executing custom injection code:", error);
+                            }
+
+                            window.reclaimCustomScript = {
+                                initialized: true,
+                                timestamp: Date.now()
+                            };
+                        } catch (error) {
+                            console.error("[INJECTION] Error executing custom injection code:", error);
+                        }
+                    }
+                    chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: dynamicInjectFunction,
+                        world: 'MAIN',
+                        args: [providerData.customInjection]
+                    }).then(() => console.log('[BACKGROUND] Custom provider injection completed'))
+                        .catch(error => {
+                            console.error('[BACKGROUND] Error creating dynamic injection function:', error);
+                        });
+                }
+
+                // Check for provider-specific script injection from js-scripts folder
+                if (templateData.providerId) {
+                    const scriptUrl = `js-scripts/${templateData.providerId}.js`;
+                    console.log(`[BACKGROUND] Checking for provider-specific script: ${scriptUrl}`);
+                    
+                    // Try to inject the provider-specific script
+                    chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        files: [scriptUrl],
+                        world: 'MAIN'
+                    }).then(() => {
+                        console.log(`[BACKGROUND] Successfully injected provider-specific script: ${scriptUrl}`);
+                        loggerService.log({
+                            message: `Provider-specific script injected: ${scriptUrl}`,
+                            type: LOG_TYPES.BACKGROUND,
+                            sessionId: templateData.sessionId || 'unknown',
+                            providerId: templateData.providerId || 'unknown',
+                            appId: templateData.applicationId || 'unknown'
+                        });
+                    }).catch(error => {
+                        // This is expected if the file doesn't exist, so we'll log it as info rather than error
+                        console.log(`[BACKGROUND] Provider-specific script not found or failed to inject: ${scriptUrl}`, error.message);
+                        loggerService.log({
+                            message: `Provider-specific script not found: ${scriptUrl}`,
+                            type: LOG_TYPES.BACKGROUND,
+                            sessionId: templateData.sessionId || 'unknown',
+                            providerId: templateData.providerId || 'unknown',
+                            appId: templateData.applicationId || 'unknown'
+                        });
+                    });
+                }
 
                 const providerName = this.providerData?.name || 'Default Provider';
                 const description = this.providerData?.description || 'Default Description';
@@ -801,7 +902,7 @@ class ReclaimExtensionManager {
             // Clear all timers immediately when starting the proof submission process
             console.log('[BACKGROUND] Starting proof submission, clearing all timers');
             this.sessionTimerManager.clearAllTimers();
-            
+
             // Check if there are proofs to submit and are equal to the number of proofs in the generatedProofs map
             if (this.generatedProofs.size === 0) {
                 console.log('[BACKGROUND] No proofs to submit');
@@ -884,6 +985,91 @@ class ReclaimExtensionManager {
         } catch (error) {
             console.error('[BACKGROUND] Error submitting proof:', error);
             throw error;
+        }
+    }
+
+    // Inject provider script for a specific tab
+    async injectProviderScriptForTab(tabId) {
+        try {
+            console.log(`[BACKGROUND] Re-injecting provider script for tab ${tabId} after navigation`);
+
+            // Check if we have provider data and the tab is managed
+            if (!this.managedTabs.has(tabId) || !this.httpProviderId) {
+                console.log(`[BACKGROUND] Tab ${tabId} is not managed or no provider ID available`);
+                return;
+            }
+
+            // Inject custom script from provider data if available
+            if (this.providerData && this.providerData.customInjection) {
+                console.log(`[BACKGROUND] Re-injecting custom provider script for tab ${tabId}`);
+
+                const dynamicInjectFunction = function (customInjectStringValue) {
+                    try {
+                        console.log('[INJECTION] Re-executing custom script after navigation');
+                        // Clean the injection code
+                        function convertStringToJS(injectionString) {
+                            const cleanedCode = injectionString
+                                .replace(/\\n/g, '\n')           // Convert literal \n to newlines
+                                .replace(/\\"/g, '"')            // Convert literal \" to quotes
+                                .replace(/\\'/g, "'")            // Convert literal \' to quotes
+                                .replace(/\\t/g, '\t')           // Convert literal \t to tabs
+                                .trim();                         // Remove extra whitespace
+                            return cleanedCode;
+                        }
+
+                        const cleanedInjectionCode = convertStringToJS(customInjectStringValue);
+                        console.log('[INJECTION] Re-cleaned injection code:', cleanedInjectionCode);
+
+                        try {
+                            // execute
+                        } catch (error) {
+                            console.error("[INJECTION] Error re-executing custom injection code:", error);
+                        }
+
+                        window.reclaimCustomScript = {
+                            initialized: true,
+                            timestamp: Date.now()
+                        };
+                    } catch (error) {
+                        console.error("[INJECTION] Error re-executing custom injection code:", error);
+                    }
+                }
+
+                chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    func: dynamicInjectFunction,
+                    world: 'MAIN',
+                    args: [this.providerData.customInjection]
+                }).then(() => console.log(`[BACKGROUND] Custom provider script re-injected for tab ${tabId}`))
+                    .catch(error => {
+                        console.error(`[BACKGROUND] Error re-injecting custom script for tab ${tabId}:`, error);
+                    });
+            }
+
+            // Inject provider-specific script from js-scripts folder
+            const scriptUrl = `js-scripts/${this.httpProviderId}.js`;
+            console.log(`[BACKGROUND] Re-injecting provider-specific script: ${scriptUrl} for tab ${tabId}`);
+
+            chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                files: [scriptUrl],
+                world: 'MAIN'
+            }).then(() => {
+                console.log(`[BACKGROUND] Successfully re-injected provider-specific script: ${scriptUrl} for tab ${tabId}`);
+                loggerService.log({
+                    message: `Provider-specific script re-injected after navigation: ${scriptUrl}`,
+                    type: LOG_TYPES.BACKGROUND,
+                    sessionId: this.sessionId || 'unknown',
+                    providerId: this.httpProviderId || 'unknown',
+                    appId: this.appId || 'unknown'
+                });
+            }).catch(error => {
+                // This is expected if the file doesn't exist, so we'll log it as info rather than error
+                console.log(`[BACKGROUND] Provider-specific script not found or failed to re-inject: ${scriptUrl} for tab ${tabId}`, error.message);
+            });
+
+        } catch (error) {
+            console.error(`[BACKGROUND] Error re-injecting provider script for tab ${tabId}:`, error);
         }
     }
 }

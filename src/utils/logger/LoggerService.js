@@ -126,18 +126,6 @@ export class LoggerService {
   }
 
   /**
-   * Get client source information.
-   * 
-   * @returns {Promise<string>} The client source string.
-   */
-  async getClientSource() {
-    const manifest = chrome.runtime.getManifest();
-    const browserType = navigator.userAgent.includes('Firefox') ? 'firefox' : 'chrome';
-    
-    return `reclaim-extension/${manifest.version} (${browserType})`;
-  }
-
-  /**
    * Get the device ID for logging.
    * 
    * @returns {Promise<string>} The device ID.
@@ -166,7 +154,7 @@ export class LoggerService {
       
       const body = JSON.stringify({
         logs: formattedLogs,
-        source: await this.getClientSource(),
+        source: 'reclaim-extension',
         deviceId: await this.getDeviceLoggingId(),
       });
       

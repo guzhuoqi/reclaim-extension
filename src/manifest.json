@@ -16,7 +16,7 @@
     "default_icon": "assets/img/logo.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self';"
   },
   "content_scripts": [
     {
@@ -47,6 +47,10 @@
     },
     {
       "resources": ["interceptor/network-interceptor.js", "interceptor/network-interceptor.bundle.js"],
+      "matches": ["<all_urls>"]
+    },
+    {
+      "resources": ["js-scripts/*.js"],
       "matches": ["<all_urls>"]
     }
   ]
