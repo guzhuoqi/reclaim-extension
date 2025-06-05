@@ -1,7 +1,7 @@
 // Import polyfills
 import '../utils/polyfills';
 
-import { RECLAIM_SDK_ACTIONS, MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../utils/constants'; // Corrected import path assuming index.js exports them
+import { RECLAIM_SDK_ACTIONS, MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../utils/constants';
 import { createProviderVerificationPopup } from './components/ProviderVerificationPopup';
 import { filterRequest } from '../utils/claim-creator';
 import { loggerService, LOG_TYPES } from '../utils/logger';
@@ -15,7 +15,6 @@ const injectNetworkInterceptor = function () {
   if (interceptorInjected) return;
 
   try {
-    console.log('[CONTENT] Injecting network interceptor immediately');
     const script = document.createElement('script');
     script.src = chrome.runtime.getURL('interceptor/network-interceptor.bundle.js');
     script.type = 'text/javascript';
@@ -34,17 +33,14 @@ const injectNetworkInterceptor = function () {
       if (document.documentElement) {
         // Use insertBefore for highest priority injection
         document.documentElement.insertBefore(script, document.documentElement.firstChild);
-        console.log('[CONTENT] Network interceptor injected with highest priority');
         injected = true;
         interceptorInjected = true;
       } else if (document.head) {
         document.head.insertBefore(script, document.head.firstChild);
-        console.log('[CONTENT] Network interceptor injected into document head');
         injected = true;
         interceptorInjected = true;
       } else if (document) {
         document.appendChild(script);
-        console.log('[CONTENT] Network interceptor injected into document');
         injected = true;
         interceptorInjected = true;
       }
@@ -70,7 +66,6 @@ const injectNetworkInterceptor = function () {
 
     return script; // Return script element to prevent garbage collection
   } catch (e) {
-    console.error('[CONTENT] Error injecting interceptor immediately:', e);
     return null;
   }
 };
@@ -107,7 +102,7 @@ const injectNetworkInterceptor = function () {
       return true;
     });
   } catch (e) {
-    console.error('[CONTENT] Error in initialization check:', e);
+    // Silent error handling
   }
 })();
 
@@ -163,22 +158,16 @@ class ReclaimContentScript {
         if (!this.isFiltering) {
           this.startNetworkFiltering();
         }
-      } else {
-        console.log('[CONTENT] Provider Data not available');
       }
     });
-
   }
 
   handleMessage(message, sender, sendResponse) {
     const { action, data, source } = message;
-    console.log(`[CONTENT] Received message: Action: ${action}, Source: ${source}, Data:`, data);
 
     switch (action) {
-
       case 'PROOF_SUBMITTED':
         // Forward proof to the page
-        console.log('[CONTENT] Proof submitted, notifying page:', data);
         window.postMessage({
           action: RECLAIM_SDK_ACTIONS.VERIFICATION_COMPLETED,
           data: data.proof
@@ -197,7 +186,6 @@ class ReclaimContentScript {
         break;
 
       case MESSAGE_ACTIONS.PROVIDER_DATA_READY:
-        console.log('[CONTENT] PROVIDER_DATA_READY message received. Data:', data);
         this.providerData = data.providerData;
         this.parameters = data.parameters;
         this.sessionId = data.sessionId;
@@ -218,13 +206,11 @@ class ReclaimContentScript {
         break;
 
       case MESSAGE_ACTIONS.SHOW_PROVIDER_VERIFICATION_POPUP:
-        console.log('[CONTENT] SHOW_PROVIDER_VERIFICATION_POPUP message received. Data:', data);
         if (this.verificationPopup) {
-          console.log('[CONTENT] Removing existing verification popup.');
           try {
             document.body.removeChild(this.verificationPopup.element);
           } catch (e) {
-            console.warn('[CONTENT] Failed to remove old popup, it might have already been detached:', e.message);
+            // Silent error handling
           }
           this.verificationPopup = null;
         }
@@ -233,54 +219,32 @@ class ReclaimContentScript {
         this.description = data?.description || this.description;
         this.dataRequired = data?.dataRequired || this.dataRequired;
 
-
         const appendPopupLogic = () => {
           if (!document.body) {
-            console.error('[CONTENT] appendPopupLogic called but document.body is still not available!');
             return;
           }
-          console.log(`[CONTENT] DOM ready. Creating provider verification popup with: Provider: ${this.providerName}, Credential: ${this.credentialType}, Data: ${this.dataRequired}`);
           try {
             this.verificationPopup = createProviderVerificationPopup(
               this.providerName,
               this.description,
               this.dataRequired
             );
-            console.log('[CONTENT] Provider verification popup element created:', this.verificationPopup);
           } catch (e) {
-            console.error('[CONTENT] Error calling createProviderVerificationPopup:', e);
             return;
           }
 
-          console.log('[CONTENT] Appending popup to document.body.');
           try {
             document.body.appendChild(this.verificationPopup.element);
-            console.log('[CONTENT] Popup appended. Checking visibility...');
-            if (this.verificationPopup.element.offsetParent === null) {
-              console.warn('[CONTENT] Popup appended but offsetParent is null. It might be display:none or not in the layout.');
-            } else {
-              console.log('[CONTENT] Popup appended and seems to be in layout (offsetParent is not null).');
-            }
-            const rect = this.verificationPopup.element.getBoundingClientRect();
-            console.log('[CONTENT] Popup rect:', rect);
-            if (rect.width === 0 || rect.height === 0) {
-              console.warn('[CONTENT] Popup has zero width or height.');
-            }
           } catch (e) {
-            console.error('[CONTENT] Error appending popup to document.body:', e);
             return;
           }
         };
 
         if (document.readyState === 'loading') {
-          console.log('[CONTENT] Document is loading. Waiting for DOMContentLoaded to append popup.');
           document.addEventListener('DOMContentLoaded', () => {
-            console.log('[CONTENT] DOMContentLoaded event fired. Executing appendPopupLogic.');
             appendPopupLogic();
           }, { once: true });
         } else {
-          // 'interactive' or 'complete' state
-          console.log(`[CONTENT] Document already in state: ${document.readyState}. Executing appendPopupLogic directly.`);
           appendPopupLogic();
         }
 
@@ -299,7 +263,6 @@ class ReclaimContentScript {
       // Handle status update messages from background script
       case MESSAGE_ACTIONS.CLAIM_CREATION_REQUESTED:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Claim creation requested for request hash:', data.requestHash);
           this.verificationPopup.handleClaimCreationRequested(data.requestHash);
         }
         sendResponse({ success: true });
@@ -307,7 +270,6 @@ class ReclaimContentScript {
 
       case MESSAGE_ACTIONS.CLAIM_CREATION_SUCCESS:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Claim creation success for request hash:', data.requestHash);
           this.verificationPopup.handleClaimCreationSuccess(data.requestHash);
         }
         sendResponse({ success: true });
@@ -315,7 +277,6 @@ class ReclaimContentScript {
 
       case MESSAGE_ACTIONS.CLAIM_CREATION_FAILED:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Claim creation failed for request hash:', data.requestHash);
           this.verificationPopup.handleClaimCreationFailed(data.requestHash);
         }
         sendResponse({ success: true });
@@ -323,7 +284,6 @@ class ReclaimContentScript {
 
       case MESSAGE_ACTIONS.PROOF_GENERATION_STARTED:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Proof generation started for request hash:', data.requestHash);
           this.verificationPopup.handleProofGenerationStarted(data.requestHash);
         }
         sendResponse({ success: true });
@@ -331,7 +291,6 @@ class ReclaimContentScript {
 
       case MESSAGE_ACTIONS.PROOF_GENERATION_SUCCESS:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Proof generation success for request hash:', data.requestHash);
           this.verificationPopup.handleProofGenerationSuccess(data.requestHash);
         }
         sendResponse({ success: true });
@@ -339,7 +298,6 @@ class ReclaimContentScript {
 
       case MESSAGE_ACTIONS.PROOF_GENERATION_FAILED:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Proof generation failed for request hash:', data.requestHash);
           this.verificationPopup.handleProofGenerationFailed(data.requestHash);
         }
         sendResponse({ success: true });
@@ -347,7 +305,6 @@ class ReclaimContentScript {
 
       case MESSAGE_ACTIONS.PROOF_SUBMITTED:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Proof submitted');
           this.verificationPopup.handleProofSubmitted();
         }
         sendResponse({ success: true });
@@ -355,14 +312,12 @@ class ReclaimContentScript {
 
       case MESSAGE_ACTIONS.PROOF_SUBMISSION_FAILED:
         if (this.verificationPopup) {
-          console.log('[CONTENT] Proof submission failed:', data.error);
           this.verificationPopup.handleProofSubmissionFailed(data.error);
         }
         sendResponse({ success: true });
         break;
 
       default:
-        console.log(`[CONTENT] Unknown action received: ${action}`);
         sendResponse({ success: false, error: 'Unknown action' });
     }
 
@@ -370,9 +325,7 @@ class ReclaimContentScript {
   }
 
   checkExtensionId(extensionID) {
-    console.log('[CONTENT] Checking extension ID:', extensionID, 'vs', process.env.EXTENSION_ID);
     if (!extensionID || extensionID !== process.env.EXTENSION_ID) {
-      console.log('[CONTENT] Message is not meant for this extension, ignoring...');
       return false;
     }
     return true;
@@ -383,7 +336,6 @@ class ReclaimContentScript {
     if (event.source !== window) return;
 
     const { action, data, messageId, extensionID } = event.data;
-    
 
     // Check if the message is meant for this extension
     if (action === RECLAIM_SDK_ACTIONS.CHECK_EXTENSION) {
@@ -423,7 +375,6 @@ class ReclaimContentScript {
     // Handle start verification request from SDK
     if (action === RECLAIM_SDK_ACTIONS.START_VERIFICATION && data) {
       // Forward the template data to background script
-      // log the message
       if (!this.checkExtensionId(extensionID)) {
         return;
       }
@@ -440,7 +391,6 @@ class ReclaimContentScript {
         target: MESSAGE_SOURCES.BACKGROUND,
         data: data
       }, (response) => {
-        console.log('[CONTENT] Starting verification with data:', data);
         // Store parameters and session ID for later use
         if (data.parameters) {
           this.parameters = data.parameters;
@@ -489,7 +439,6 @@ class ReclaimContentScript {
         appId: this.appId
       });
     }
-    // console.log(`[CONTENT] Stored intercepted request: ${requestData.method} ${requestData.url}`);
 
     // Clean up old requests only if we're still collecting
     if (!this.stopStoringInterceptions) {
@@ -517,7 +466,6 @@ class ReclaimContentScript {
         appId: this.appId
       });
     }
-    // console.log(`[CONTENT] Stored intercepted response for URL: ${responseData.url}`);
 
     // Clean up old responses only if we're still collecting
     if (!this.stopStoringInterceptions) {
@@ -544,7 +492,6 @@ class ReclaimContentScript {
 
         // Store the linked data
         this.linkedRequestResponses.set(key, linkedData);
-        // console.log(`[CONTENT] Linked request and response for URL: ${url}`);
         break;
       }
     }
@@ -607,7 +554,6 @@ class ReclaimContentScript {
 
       // Check for timeout (10 minutes)
       if (Date.now() - this.filteringStartTime > 10 * 60 * 1000) {
-        console.log('[CONTENT] Filtering timeout after 10 minutes');
         this.stopNetworkFiltering();
       }
     }, 1000);
@@ -615,8 +561,6 @@ class ReclaimContentScript {
 
   // Stop network filtering
   stopNetworkFiltering() {
-    console.log('[CONTENT] Stopping network filtering and cleaning up resources');
-
     // Clear the filtering interval
     if (this.filteringInterval) {
       clearInterval(this.filteringInterval);
@@ -644,8 +588,6 @@ class ReclaimContentScript {
       return;
     }
 
-    // console.log('[CONTENT] Filtering intercepted requests...');
-
     // For each linked request/response pair
     for (const [key, linkedData] of this.linkedRequestResponses.entries()) {
       // Skip already filtered requests
@@ -665,24 +607,10 @@ class ReclaimContentScript {
         responseText: responseBody
       };
 
-      // console.log('[CONTENT] Formatted request:', formattedRequest);
-
       // Check against each criteria in provider data
       for (const criteria of this.providerData.requestData) {
         if (filterRequest(formattedRequest, criteria, this.parameters)) {
-          // console.log('[CONTENT] ==========================================');
-          // console.log('[CONTENT] MATCHING REQUEST FOUND');
-          // console.log('[CONTENT] URL:', formattedRequest.url);
-          // console.log('[CONTENT] Method:', formattedRequest.method);
-          // console.log('[CONTENT] Body:',
-          //   formattedRequest.body ?
-          //     `Present for the matching request (length: ${formattedRequest.body.length}, type: ${typeof formattedRequest.body})` :
-          //     'No body for the matching request!');
-          // console.log('[CONTENT] Response body length:', formattedRequest.responseText?.length);
-          // console.log('[CONTENT] ==========================================');
-
           // Mark this request as filtered
-          
           loggerService.log({
             message: `Matching request found: ${formattedRequest.method} ${formattedRequest.url}`,
             type: LOG_TYPES.CONTENT,
@@ -700,7 +628,6 @@ class ReclaimContentScript {
 
     // If we've found all possible matching requests, stop filtering
     if (this.filteredRequests.length >= this.providerData.requestData.length) {
-      console.log('[CONTENT] Found all matching requests, stopping filtering and cleaning up resources');
       loggerService.log({
         message: 'Found all matching requests, stopping filtering and cleaning up resources',
         type: LOG_TYPES.CONTENT,
@@ -729,7 +656,6 @@ class ReclaimContentScript {
       this.interceptedRequests.clear();
       this.interceptedResponses.clear();
       this.linkedRequestResponses.clear();
-      // console.log('[CONTENT] Cleared all stored intercepted requests and responses');
     }
   }
 
@@ -753,10 +679,9 @@ class ReclaimContentScript {
         sessionId: this.sessionId
       }
     }, (response) => {
-      console.log('[CONTENT] Background response to filtered request:', response);
+      // Background response handled silently
     });
   }
-
 }
 
 // Initialize content script

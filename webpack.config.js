@@ -58,7 +58,6 @@ var options = {
   ],
 
   entry: {
-    popup: path.join(__dirname, "src", "popup", "popup.js"),
     "background/background": path.join(__dirname, "src", "background", "background.js"),
     "content/content": path.join(__dirname, "src", "content", "content.js"),
     "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js"),
@@ -242,16 +241,6 @@ var options = {
         },
         // Add binary file handling
         {
-          from: "src/popup/popup.html",
-          to: path.join(__dirname, "build", "popup"),
-          force: true,
-        },
-        {
-          from: "src/popup/popup.css",
-          to: path.join(__dirname, "build", "popup"),
-          force: true,
-        },
-        {
           from: "src/assets/img/logo.png",
           to: path.join(__dirname, "build", "assets", "img"),
           force: true,
@@ -300,7 +289,7 @@ if (env.NODE_ENV === "development") {
         extractComments: false,
         terserOptions: {
           compress: {
-            drop_console: false
+            drop_console: true
           },
         }
       }),

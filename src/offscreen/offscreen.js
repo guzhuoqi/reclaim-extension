@@ -39,17 +39,11 @@ class OffscreenProofGenerator {
   }
 
   init() {
-    console.log('[OFFSCREEN] Initializing offscreen document');
-
-    // Set up message listeners
     chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-
-    // Notify background script that offscreen document is ready
     this.sendReadySignal();
   }
 
   sendReadySignal() {
-    console.log('[OFFSCREEN] Sending ready signal to background script');
     chrome.runtime.sendMessage({
       action: MESSAGE_ACTIONS.OFFSCREEN_DOCUMENT_READY,
       source: MESSAGE_SOURCES.OFFSCREEN,
@@ -60,24 +54,18 @@ class OffscreenProofGenerator {
   handleMessage(message, sender, sendResponse) {
     const { action, source, target, data } = message;
 
-    // Only process messages targeted at offscreen document
     if (target !== MESSAGE_SOURCES.OFFSCREEN) return;
-
-    console.log('[OFFSCREEN] Received message:', action, 'from', source);
 
     switch (action) {
       case 'PING_OFFSCREEN':
-        // Respond to ping by sending ready signal
         this.sendReadySignal();
         sendResponse({ success: true });
         break;
 
       case MESSAGE_ACTIONS.GENERATE_PROOF:
-        // Handle proof generation using createClaimOnAttestor
         (async () => {
           try {
             const proof = await this.generateProof(data);
-            console.log('[OFFSCREEN] Proof generated successfully');
             chrome.runtime.sendMessage({
               action: MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE,
               source: MESSAGE_SOURCES.OFFSCREEN,
@@ -86,7 +74,6 @@ class OffscreenProofGenerator {
               proof: proof
             });
           } catch (error) {
-            console.error('[OFFSCREEN] Error generating proof:', error);
             chrome.runtime.sendMessage({
               action: MESSAGE_ACTIONS.GENERATE_PROOF_RESPONSE,
               source: MESSAGE_SOURCES.OFFSCREEN,
@@ -97,7 +84,6 @@ class OffscreenProofGenerator {
           }
         })();
 
-        // Respond immediately to keep the message channel open
         sendResponse({ received: true });
         break;
 
@@ -109,14 +95,12 @@ class OffscreenProofGenerator {
           chrome.runtime.sendMessage({
             action: MESSAGE_ACTIONS.GET_PRIVATE_KEY_RESPONSE,
             source: MESSAGE_SOURCES.OFFSCREEN,
-            target: source, // Send back to the original requester
+            target: source,
             success: true,
             privateKey: privateKey
           });
-          sendResponse({ success: true, received: true }); // Acknowledge message handling
+          sendResponse({ success: true, received: true });
         } catch (error) {
-          console.error('[OFFSCREEN] Error generating private key:', error);
-          // Send error response back to caller
           chrome.runtime.sendMessage({
             action: MESSAGE_ACTIONS.GET_PRIVATE_KEY_RESPONSE,
             source: MESSAGE_SOURCES.OFFSCREEN,
@@ -124,61 +108,45 @@ class OffscreenProofGenerator {
             success: false,
             error: error.message || 'Unknown error generating private key'
           });
-          sendResponse({ success: false, error: error.message }); // Acknowledge with error
+          sendResponse({ success: false, error: error.message });
         }
-        break; // Important to break here
+        break;
 
       default:
-        console.log('[OFFSCREEN] Unknown action:', action);
         sendResponse({ success: false, error: 'Unknown action' });
     }
 
-    return true; // Keep the message channel open for async response
+    return true;
   }
 
   async generateProof(claimData) {
     if (!claimData) {
       throw new Error('No claim data provided for proof generation');
     }
-    // extract sessionId from claimData
+    
     const sessionId = claimData.sessionId;
-    // remove sessionId from claimData to avoid it being sent to the attestor
     delete claimData.sessionId;
     
     try {
-      console.log('[OFFSCREEN] Session ID:', sessionId);
-      console.log('[OFFSCREEN] Claim data:', claimData);
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_STARTED);
       
-      // Create a variable to track if timeout occurred
       let timeoutOccurred = false;
       
-      // Create a promise that will be rejected after a timeout
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
           timeoutOccurred = true;
           reject(new Error('Proof generation timed out after 1 minute'));
-        }, 60000); // 1 minute timeout
+        }, 60000);
       });
       
-      // Create a promise for the actual claim generation
       const attestorPromise = createClaimOnAttestor(claimData);
       
-      // Race the two promises - whichever completes first wins
       const result = await Promise.race([attestorPromise, timeoutPromise]);
       
-      // If execution reaches here, attestor was successful before timeout
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_SUCCESS);
-      console.log('[OFFSCREEN] Claim created successfully:', result);
       return result;
     } catch (error) {
-      // Log the actual error
-      console.error('[OFFSCREEN] Proof generation failed:', error.message);
-      
-      // Update status to failed
       await updateSessionStatus(sessionId, RECLAIM_SESSION_STATUS.PROOF_GENERATION_FAILED);
-      
-      // Rethrow the error to be handled by the caller
       throw error;
     }
   }

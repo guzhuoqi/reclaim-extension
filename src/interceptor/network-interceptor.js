@@ -2,15 +2,17 @@
 
 (function () {
     const injectionFunction = function () {
-
         /**
          * Debug utility for consistent logging across the interceptor
          * @type {Object}
          */
         const debug = {
-            log: (...args) => console.log("🔍 [Debug]:", ...args),
-            error: (...args) => console.error("❌ [Error]:", ...args),
-            info: (...args) => console.info("ℹ️ [Info]:", ...args),
+            // log: (...args) => console.log("🔍 [Debug]:", ...args),
+            // error: (...args) => console.error("❌ [Error]:", ...args),
+            // info: (...args) => console.info("ℹ️ [Info]:", ...args),
+            log: (...args) => undefined, // Disabled console.log("🔍 [Debug]:", ...args),
+            error: (...args) => undefined, // Disabled console.error("❌ [Error]:", ...args),
+            info: (...args) => undefined, // Disabled console.info("ℹ️ [Info]:", ...args),
         };
 
         /**
@@ -498,7 +500,6 @@
             //     body: response.body,
             // });
 
-
             // Create a completely new object with only primitive values
             try {
                 // Safely extract headers as a plain object
@@ -600,8 +601,6 @@
                 }, '*');
             }
         });
-
-
 
         /**
          * Expose the interceptor instance globally

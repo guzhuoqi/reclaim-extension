@@ -12,7 +12,6 @@
     "service_worker": "background/background.bundle.js"
   },
   "action": {
-    "default_popup": "popup/popup.html",
     "default_icon": "assets/img/logo.png"
   },
   "content_security_policy": {
