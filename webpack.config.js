@@ -58,10 +58,10 @@ var options = {
   ],
 
   entry: {
-    popup: path.join(__dirname, "src", "popup", "popup.js"),
     "background/background": path.join(__dirname, "src", "background", "background.js"),
     "content/content": path.join(__dirname, "src", "content", "content.js"),
-    "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js")
+    "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js"),
+    "interceptor/network-interceptor": path.join(__dirname, "src", "interceptor", "network-interceptor.js")
   },
   output: {
     filename: "[name].bundle.js",
@@ -206,6 +206,11 @@ var options = {
     new webpack.ProgressPlugin(),
     // expose and write the allowed env vars on the compiled bundle
     new webpack.EnvironmentPlugin(["NODE_ENV"]),
+    new webpack.DefinePlugin({
+      'process.env.NODE_ENV': JSON.stringify(env.NODE_ENV),
+      'process.env.DEBUG': JSON.stringify(process.env.DEBUG || false),
+      'process.env.EXTENSION_ID': JSON.stringify(env.EXTENSION_ID)
+    }),
     // Add NodePolyfillPlugin to handle Node.js polyfills
     new NodePolyfillPlugin(),
     // Provide global Buffer and process
@@ -236,18 +241,13 @@ var options = {
         },
         // Add binary file handling
         {
-          from: "src/popup/popup.html",
-          to: path.join(__dirname, "build", "popup"),
-          force: true,
-        },
-        {
-          from: "src/popup/popup.css",
-          to: path.join(__dirname, "build", "popup"),
-          force: true,
-        },
-        {
           from: "src/assets/img/logo.png",
           to: path.join(__dirname, "build", "assets", "img"),
+          force: true,
+        },
+        {
+          from: "src/js-scripts",
+          to: path.join(__dirname, "build", "js-scripts"),
           force: true,
         },
         {
@@ -281,27 +281,20 @@ var options = {
 if (env.NODE_ENV === "development") {
   options.devtool = "cheap-module-source-map";
 } else {
+  options.devtool = "source-map";
   options.optimization = {
     minimize: true,
     minimizer: [
       new TerserPlugin({
         extractComments: false,
+        terserOptions: {
+          compress: {
+            drop_console: true
+          },
+        }
       }),
     ],
-    splitChunks: {
-      chunks: 'all',
-      cacheGroups: {
-        vendors: {
-          test: /[\\/]node_modules[\\/]/,
-          name(module) {
-            // Get the name of the npm package
-            const packageName = module.context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)[1];
-            // Return a valid filename
-            return `vendor-${packageName.replace('@', '')}`;
-          },
-        },
-      },
-    },
+    splitChunks: false,
   };
 }
 

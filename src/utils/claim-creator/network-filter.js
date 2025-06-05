@@ -1,3 +1,6 @@
+// Import shared utility functions
+import { getValueFromJsonPath, getValueFromXPath, isJsonFormat, safeJsonParse } from './params-extractor-utils.js';
+
 // Escape special regex characters in string
 function escapeSpecialCharacters(input) {
   return input.replace(/[[\]()*+?.,\\^$|#]/g, '\\$&');
@@ -17,7 +20,7 @@ function getTemplateVariables(template) {
 }
 
 // Convert template to regex, substituting known parameters
-function convertTemplateToRegex(template, parameters = {}) {
+export function convertTemplateToRegex(template, parameters = {}) {
   // Escape special regex characters
   let escapedTemplate = escapeSpecialCharacters(template);
 
@@ -49,9 +52,26 @@ function convertTemplateToRegex(template, parameters = {}) {
 // Function to check if a request matches filtering criteria
 function matchesRequestCriteria(request, filterCriteria, parameters = {}) {
   // Check URL match
-  const urlRegex = new RegExp(filterCriteria.url);
-  if (!urlRegex.test(request.url)) {
-    return false;
+
+  // For exact match
+  if (filterCriteria.url === request.url) {
+    return true;
+  }
+
+  // For regex match
+  if (filterCriteria.urlType === 'REGEX') {
+    const urlRegex = new RegExp(convertTemplateToRegex(filterCriteria.url, parameters).pattern);
+    if (!urlRegex.test(request.url)) {
+      return false;
+    }
+  }
+
+  // For template match
+  if (filterCriteria.urlType === 'TEMPLATE') {
+    const urlTemplate = new RegExp(convertTemplateToRegex(filterCriteria.url, parameters).pattern);
+    if (!urlTemplate.test(request.url)) {
+      return false;
+    }
   }
 
   // Check method match
@@ -102,6 +122,62 @@ function matchesResponseCriteria(responseText, matchCriteria, parameters = {}) {
   return true;
 }
 
+// Function to check if response fields match responseRedactions criteria
+function matchesResponseFields(responseText, responseRedactions) {
+  if (!responseRedactions || responseRedactions.length === 0) {
+    return true;
+  }
+
+  // Try to parse JSON if the response appears to be JSON
+  let jsonData = null;
+  const isJson = isJsonFormat(responseText);
+
+  if (isJson) {
+    jsonData = safeJsonParse(responseText);
+    if (jsonData) {
+    }
+  }
+
+  // Check each redaction pattern
+  for (const redaction of responseRedactions) {
+    // If jsonPath is specified and response is JSON
+    if (redaction.jsonPath && jsonData) {
+      try {
+        const value = getValueFromJsonPath(jsonData, redaction.jsonPath);
+
+        // If we get here but value is undefined, the path doesn't exist
+        if (value === undefined || value === null) return false;
+      } catch (error) {
+        console.error(`[NETWORK-FILTER] Error checking jsonPath ${redaction.jsonPath}:`, error);
+        return false;
+      }
+    }
+    // If xPath is specified and response is not JSON (assumed to be HTML)
+    else if (redaction.xPath && !isJson) {
+      try {
+        const value = getValueFromXPath(responseText, redaction.xPath);
+        if (!value) return false;
+      } catch (error) {
+        console.error(`[NETWORK-FILTER] Error checking xPath ${redaction.xPath}:`, error);
+        return false;
+      }
+    }
+    // If regex is specified
+    else if (redaction.regex) {
+      try {
+        const regex = new RegExp(redaction.regex);
+        if (!regex.test(responseText)) return false;
+      } catch (error) {
+        console.error(`[NETWORK-FILTER] Error checking regex ${redaction.regex}:`, error);
+        return false;
+      }
+    }
+  }
+
+  // All checks passed
+  return true;
+}
+
 // Main filtering function
 export const filterRequest = (request, filterCriteria, parameters = {}) => {
   try {
@@ -110,9 +186,20 @@ export const filterRequest = (request, filterCriteria, parameters = {}) => {
       return false;
     }
 
+
     // Then check if response matches (if we have response data)
     if (request.responseText && filterCriteria.responseMatches) {
-      return matchesResponseCriteria(request.responseText, filterCriteria.responseMatches, parameters);
+      if (!matchesResponseCriteria(request.responseText, filterCriteria.responseMatches, parameters)) {
+        return false;
+      }
+    }
+
+    
+    // Check if the response fields match the responseRedactions criteria
+    if (request.responseText && filterCriteria.responseRedactions) {
+      if (!matchesResponseFields(request.responseText, filterCriteria.responseRedactions)) {
+        return false;
+      }
     }
 
     return true;

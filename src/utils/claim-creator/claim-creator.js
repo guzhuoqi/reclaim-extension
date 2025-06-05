@@ -1,12 +1,26 @@
 import { 
-    extractDynamicParamNames, 
     extractParamsFromUrl, 
     extractParamsFromBody, 
     extractParamsFromResponse,
     separateParams
 } from './params-extractor';
-import { MESSAGER_ACTIONS, MESSAGER_TYPES } from '../constants';
+import { MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../constants';
 import { ensureOffscreenDocument } from '../offscreen-manager';
+
+// Generate Chrome Android user agent (adapted from reference code)
+const generateChromeAndroidUserAgent = (chromeMajorVersion = 135, isMobile = true) => {
+    if (chromeMajorVersion <= 0) {
+        chromeMajorVersion = 135;
+    }
+
+    const platform = "(Linux; Android 10; K)";
+    const engine = "AppleWebKit/537.36 (KHTML, like Gecko)";
+    const chromeVersionString = `Chrome/${chromeMajorVersion}.0.0.0`;
+    const mobileToken = isMobile ? " Mobile" : "";
+    const safariCompat = "Safari/537.36";
+
+    return `Mozilla/5.0 ${platform} ${engine} ${chromeVersionString}${mobileToken} ${safariCompat}`;
+};
 
 const getPrivateKeyFromOffscreen = () => {
     return new Promise((resolve, reject) => {
@@ -18,9 +32,9 @@ const getPrivateKeyFromOffscreen = () => {
 
         const messageListener = (message, sender) => {
             // Ensure the message is from the offscreen document and is the expected response
-            if (message.action === MESSAGER_ACTIONS.GET_PRIVATE_KEY_RESPONSE &&
-                message.source === MESSAGER_TYPES.OFFSCREEN &&
-                message.target === MESSAGER_TYPES.BACKGROUND) { // Assuming this script runs in background context
+            if (message.action === MESSAGE_ACTIONS.GET_PRIVATE_KEY_RESPONSE &&
+                message.source === MESSAGE_SOURCES.OFFSCREEN &&
+                message.target === MESSAGE_SOURCES.BACKGROUND) { // Assuming this script runs in background context
 
                 clearTimeout(callTimeout);
                 chrome.runtime.onMessage.removeListener(messageListener);
@@ -41,9 +55,9 @@ const getPrivateKeyFromOffscreen = () => {
 
         console.log('[CLAIM-CREATOR] Requesting private key from offscreen document');
         chrome.runtime.sendMessage({
-            action: MESSAGER_ACTIONS.GET_PRIVATE_KEY,
-            source: MESSAGER_TYPES.BACKGROUND, // Assuming this script runs in background context
-            target: MESSAGER_TYPES.OFFSCREEN
+            action: MESSAGE_ACTIONS.GET_PRIVATE_KEY,
+            source: MESSAGE_SOURCES.BACKGROUND, // Assuming this script runs in background context
+            target: MESSAGE_SOURCES.OFFSCREEN
         }, response => {
             if (chrome.runtime.lastError) {
                 clearTimeout(callTimeout);
@@ -57,7 +71,7 @@ const getPrivateKeyFromOffscreen = () => {
     });
 };
 
-export const createClaimObject = async (request, providerData, sessionId) => {
+export const createClaimObject = async (request, providerData, sessionId, loginUrl) => {
     console.log('[CLAIM-CREATOR] Creating claim object from request data');
     
     // Ensure offscreen document is ready
@@ -70,6 +84,9 @@ export const createClaimObject = async (request, providerData, sessionId) => {
         // Depending on requirements, you might want to throw error or handle differently
         throw new Error(`Failed to initialize offscreen document: ${error.message}`);
     }
+    
+    // Generate appropriate user agent for the platform
+    const userAgent = await generateChromeAndroidUserAgent();
     
     // Define public headers that should be in params
     const PUBLIC_HEADERS = [
@@ -91,13 +108,20 @@ export const createClaimObject = async (request, providerData, sessionId) => {
     const secretParams = {};
     
     // Process URL
-    params.url = request.url;
+    params.url = providerData.urlType === 'TEMPLATE' ? providerData.url : request.url;
     params.method = request.method || 'GET';
     
     // Process headers - split between public and secret
     if (request.headers) {
-        const publicHeaders = {};
-        const secretHeaders = {};
+        console.log('request.headers: ', request.headers);
+        const publicHeaders = {
+            'Sec-Fetch-Mode': 'same-origin',
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': userAgent
+        };
+        const secretHeaders = {
+            'Referer': loginUrl ?? ''
+        };
         
         Object.entries(request.headers).forEach(([key, value]) => {
             const lowerKey = key.toLowerCase();
@@ -118,8 +142,8 @@ export const createClaimObject = async (request, providerData, sessionId) => {
     } 
     
     // Process body if available
-    if (request.body) {
-        params.body = request.body;
+    if (providerData?.bodySniff?.enabled && request.body) {
+        params.body = providerData?.bodySniff?.template
     }
     
     // Process cookie string if available in request
@@ -128,45 +152,34 @@ export const createClaimObject = async (request, providerData, sessionId) => {
     } 
     
     // Extract dynamic parameters from various sources
-    const allParamValues = {};
+    let allParamValues = {};
     
     // 1. Extract params from URL if provider has URL template
-    if (providerData.urlTemplate && request.url) {
-        extractParamsFromUrl(providerData.urlTemplate, request.url, allParamValues);
+    if (providerData.urlType === 'TEMPLATE' && request.url) {
+        // append the extracted parameters to the existing allParamValues
+        allParamValues = { ...allParamValues, ...extractParamsFromUrl(providerData.url, request.url) };
     }
     
     // 2. Extract params from request body if provider has body template
-    if (providerData.bodyTemplate && request.body) {
-        extractParamsFromBody(providerData.bodyTemplate, request.body, allParamValues);
+
+    if (providerData?.bodySniff?.enabled && request.body) {
+        // append the extracted parameters to the existing allParamValues
+        allParamValues = { ...allParamValues, ...extractParamsFromBody(providerData.bodySniff.template, request.body) };
     }
     
     // 3. Extract params from response if available
     if (request.responseText && providerData.responseMatches) {
-        extractParamsFromResponse(
+        // append the extracted parameters to the existing allParamValues
+        allParamValues = { ...allParamValues, ...extractParamsFromResponse(
             request.responseText, 
             providerData.responseMatches, 
-            providerData.responseRedactions || [],
-            allParamValues
-        );
-        
-        // Log the extracted response parameters
-        console.log('[CLAIM-CREATOR] Extracted parameters from response:', 
-            Object.keys(allParamValues).join(', '));
-    }
-    
-    // 4. Add any pre-defined parameter values from providerData
-    if (providerData.paramValues) {
-        Object.entries(providerData.paramValues).forEach(([key, value]) => {
-            // Only add if not already extracted from request/response
-            if (!(key in allParamValues)) {
-                allParamValues[key] = value;
-            }
-        });
+            providerData.responseRedactions || []
+        ) };
     }
     
     // 5. Separate parameters into public and secret
     const { publicParams, secretParams: secretParamValues } = separateParams(allParamValues);
-    
+
     // Add parameter values to respective objects
     if (Object.keys(publicParams).length > 0) {
         params.paramValues = publicParams;

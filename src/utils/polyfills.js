@@ -1,7 +1,8 @@
 // Polyfills for browser and service worker environments
 import { Buffer } from 'buffer';
 import process from 'process';
-import { WebSocket } from './websocket-polyfill';
+// Skip WebSocket import for content script
+// import { WebSocket } from './websocket-polyfill';
 
 // Define a safe global object that works across environments
 const getGlobalObject = () => {
@@ -16,17 +17,29 @@ const global = getGlobalObject();
 
 // Check if we're in a service worker or browser environment
 const isServiceWorker = typeof window === 'undefined';
+// Determine if we're in content script context
+const isContentScript = typeof document !== 'undefined' && document.contentType !== undefined;
 
 // Make Buffer and process available globally
 global.Buffer = global.Buffer || Buffer;
 global.process = global.process || process;
 
-// Make WebSocket polyfill available globally if native one is not available
-if (typeof global.WebSocket === 'undefined') {
-  global.WebSocket = WebSocket;
-  console.log('[POLYFILLS] Added WebSocket polyfill to global');
+// Don't add WebSocket polyfill in content script context
+if (typeof global.WebSocket === 'undefined' && !isContentScript) {
+  // Dynamically import WebSocket only when needed and not in content script
+  try {
+    const { WebSocket } = require('./websocket-polyfill');
+    global.WebSocket = WebSocket;
+    console.log('[POLYFILLS] Added WebSocket polyfill to global');
+  } catch (e) {
+    console.warn('[POLYFILLS] Failed to load WebSocket polyfill:', e);
+  }
 } else {
-  console.log('[POLYFILLS] Using native WebSocket implementation');
+  if (!isContentScript) {
+    console.log('[POLYFILLS] Using native WebSocket implementation');
+  } else {
+    console.log('[POLYFILLS] Skipping WebSocket in content script context');
+  }
 }
 
 // Force browser mode for Node.js compatibility
@@ -40,7 +53,18 @@ if (typeof global.require !== 'function') {
     // Return mock implementations for common modules
     switch (moduleName) {
       case 'ws':
-        return { WebSocket }; // Return our polyfill for ws
+        // Don't return WebSocket in content script context
+        if (isContentScript) {
+          console.log('[POLYFILLS] Blocking ws module in content script');
+          return {}; // Empty implementation for content script
+        }
+        try {
+          const { WebSocket } = require('./websocket-polyfill');
+          return { WebSocket }; // Return our polyfill for ws
+        } catch (e) {
+          console.warn('[POLYFILLS] Failed to load WebSocket for ws module:', e);
+          return {};
+        }
       case 'fs':
         return global.fs;
       case 'path':
@@ -64,7 +88,18 @@ if (typeof global.require !== 'function') {
   const originalRequire = global.require;
   global.require = (moduleName) => {
     if (moduleName === 'ws') {
-      return { WebSocket }; // Return our polyfill for ws
+      // Don't return WebSocket in content script context
+      if (isContentScript) {
+        console.log('[POLYFILLS] Blocking ws module in content script');
+        return {}; // Empty implementation for content script
+      }
+      try {
+        const { WebSocket } = require('./websocket-polyfill');
+        return { WebSocket }; // Return our polyfill for ws
+      } catch (e) {
+        console.warn('[POLYFILLS] Failed to load WebSocket for ws module:', e);
+        return {};
+      }
     }
     try {
       return originalRequire(moduleName);

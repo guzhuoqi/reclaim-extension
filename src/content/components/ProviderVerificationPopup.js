@@ -12,124 +12,562 @@
 
 // Basic styling will be added here or in a linked CSS file. 
 
-export function createProviderVerificationPopup(providerName, credentialType, dataRequired) {
+// Create and manage the verification popup UI with status indicators
+// Shows various states: initial, loading, success, error, etc.
+
+export function createProviderVerificationPopup(providerName, description, dataRequired) {
+    // Inject CSS styles directly instead of importing them
+    injectStyles();
+    
     const popup = document.createElement('div');
-    popup.id = 'humanity-protocol-popup';
-    popup.style.position = 'fixed';
-    popup.style.bottom = '20px';
-    popup.style.left = '20px';
-    popup.style.width = '300px';
-    popup.style.backgroundColor = '#2C2C2E'; // Dark background similar to image
-    popup.style.color = '#FFFFFF';
-    popup.style.borderRadius = '12px';
-    popup.style.padding = '20px';
-    popup.style.fontFamily = 'Arial, sans-serif';
-    popup.style.zIndex = '9999';
-    popup.style.boxShadow = '0px 4px 12px rgba(0, 0, 0, 0.5)';
-    popup.style.fontSize = '14px';
+    popup.id = 'reclaim-protocol-popup';
+    popup.className = 'reclaim-popup';
+    popup.style.animation = 'reclaim-appear 0.3s ease-out';
 
-    popup.innerHTML = `
-        <div style="display: flex; align-items: center; margin-bottom: 15px;">
-            <img src="${chrome.runtime.getURL('assets/img/logo.png')}" alt="Humanity Protocol" style="width: 24px; height: 24px; margin-right: 10px;">
-            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">humanity protocol</h3>
-        </div>
+    // Track the state of claim generation
+    const state = {
+        totalClaims: 0,
+        completedClaims: 0,
+        proofSubmitted: false,
+        inProgress: false,
+        error: null
+    };
 
-        <div style="margin-bottom: 15px;">
-            <p style="margin: 0 0 5px 0; color: #A0A0A5; font-size: 12px;">Source</p>
-            <p style="margin: 0; font-size: 16px; font-weight: 500;">${providerName}</p>
-        </div>
+    // Create initial HTML content
+    renderInitialContent();
 
-        <div style="margin-bottom: 15px;">
-            <p style="margin: 0 0 5px 0; color: #A0A0A5; font-size: 12px;">Credential Type</p>
-            <p style="margin: 0; font-size: 16px; font-weight: 500;">${credentialType}</p>
-        </div>
+    // Function to inject CSS styles directly
+    function injectStyles() {
+        // Check if styles are already injected
+        if (document.getElementById('reclaim-popup-styles')) {
+            return;
+        }
+        
+        const styleEl = document.createElement('style');
+        styleEl.id = 'reclaim-popup-styles';
+        styleEl.textContent = `
+            .reclaim-popup {
+              position: fixed;
+              bottom: 20px;
+              right: 20px;
+              width: 350px;
+              background-color: #2C2C2E;
+              color: #FFFFFF;
+              border-radius: 12px;
+              padding: 20px;
+              font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+              z-index: 9999;
+              box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.25);
+              font-size: 14px;
+              transition: all 0.3s ease;
+              opacity: 1;
+              transform: translateY(0);
+              backdrop-filter: blur(10px);
+              -webkit-backdrop-filter: blur(10px);
+            }
+            
+            .reclaim-popup-header {
+              display: flex;
+              align-items: center;
+              margin-bottom: 15px;
+            }
+            
+            .reclaim-popup-logo {
+              width: 24px;
+              height: 24px;
+              margin-right: 10px;
+            }
+            
+            .reclaim-popup-title {
+              margin: 0;
+              font-size: 16px;
+              font-weight: 600;
+            }
+            
+            .reclaim-popup-section {
+              margin-bottom: 15px;
+            }
+            
+            .reclaim-popup-label {
+              margin: 0 0 5px 0;
+              color: #A0A0A5;
+              font-size: 12px;
+            }
+            
+            .reclaim-popup-value {
+              margin: 0;
+              font-size: 16px;
+              font-weight: 500;
+            }
+            
+            .reclaim-steps-container {
+              margin-top: 20px;
+              padding-top: 15px;
+              border-top: 1px solid #3A3A3C;
+            }
+            
+            .reclaim-steps-title {
+              font-size: 14px;
+              font-weight: 600;
+              margin-bottom: 12px;
+            }
+            
+            .reclaim-step {
+              display: flex;
+              align-items: flex-start;
+              margin-bottom: 12px;
+            }
+            
+            .reclaim-step-number {
+              background-color: #0A84FF;
+              color: white;
+              border-radius: 50%;
+              width: 22px;
+              height: 22px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 12px;
+              margin-right: 10px;
+              flex-shrink: 0;
+            }
+            
+            .reclaim-step-text {
+              font-size: 14px;
+              line-height: 1.4;
+            }
+            
+            .reclaim-status-container {
+              margin-top: 15px;
+              overflow: hidden;
+              transition: max-height 0.3s ease;
+            }
+            
+            .reclaim-status-progress {
+              display: flex;
+              flex-direction: column;
+              margin-bottom: 15px;
+            }
+            
+            .reclaim-progress-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 5px;
+            }
+            
+            .reclaim-status-text {
+              font-size: 14px;
+              color: #E0E0E5;
+            }
+            
+            .reclaim-progress-counter {
+              font-size: 14px;
+              color: #E0E0E5;
+            }
+            
+            .reclaim-progress-bar-container {
+              height: 4px;
+              width: 100%;
+              background-color: #3A3A3C;
+              border-radius: 2px;
+              overflow: hidden;
+            }
+            
+            .reclaim-progress-bar {
+              height: 100%;
+              width: 0%;
+              background-color: #0A84FF;
+              border-radius: 2px;
+              transition: width 0.3s ease;
+            }
+            
+            .reclaim-progress-bar.success {
+              background-color: #30D158;
+            }
+            
+            .reclaim-progress-bar.error {
+              background-color: #FF453A;
+            }
+            
+            .reclaim-status-message {
+              margin-top: 10px;
+              font-size: 14px;
+              color: #E0E0E5;
+            }
+            
+            .reclaim-status-icon {
+              display: flex;
+              justify-content: center;
+              margin: 15px 0;
+            }
+            
+            .reclaim-icon-circle {
+              background-color: #30D158;
+              border-radius: 50%;
+              width: 40px;
+              height: 40px;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              transition: all 0.3s ease;
+            }
+            
+            .reclaim-icon-circle.error {
+              background-color: #FF453A;
+            }
+            
+            .reclaim-circular-loader {
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              margin: 20px 0;
+            }
+            
+            .reclaim-circular-loader svg {
+              width: 48px;
+              height: 48px;
+              animation: reclaim-rotate 2s linear infinite;
+            }
+            
+            .reclaim-circular-loader circle {
+              stroke: #0A84FF;
+              stroke-width: 4;
+              stroke-dasharray: 150, 200;
+              stroke-dashoffset: -10;
+              stroke-linecap: round;
+              fill: none;
+              animation: reclaim-dash 1.5s ease-in-out infinite;
+            }
+            
+            @keyframes reclaim-rotate {
+              100% {
+                transform: rotate(360deg);
+              }
+            }
+            
+            @keyframes reclaim-dash {
+              0% {
+                stroke-dasharray: 1, 200;
+                stroke-dashoffset: 0;
+              }
+              50% {
+                stroke-dasharray: 89, 200;
+                stroke-dashoffset: -35;
+              }
+              100% {
+                stroke-dasharray: 89, 200;
+                stroke-dashoffset: -124;
+              }
+            }
+            
+            /* Animations */
+            @keyframes reclaim-progress-pulse {
+              0% { opacity: 1; }
+              50% { opacity: 0.6; }
+              100% { opacity: 1; }
+            }
+            
+            @keyframes reclaim-appear {
+              0% { 
+                opacity: 0;
+                transform: translateY(20px);
+              }
+              100% { 
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            
+            @keyframes reclaim-success-checkmark {
+              0% {
+                stroke-dashoffset: 24;
+              }
+              100% {
+                stroke-dashoffset: 0;
+              }
+            }
+            
+            .reclaim-success-checkmark {
+              stroke-dasharray: 24;
+              stroke-dashoffset: 24;
+              animation: reclaim-success-checkmark 0.5s ease forwards;
+            }
+            
+            /* For small screens */
+            @media (max-width: 480px) {
+              .reclaim-popup {
+                width: calc(100% - 40px);
+                bottom: 10px;
+                right: 10px;
+                left: 10px;
+                max-width: 100%;
+              }
+            }
+        `;
+        
+        // Handle document.head not being available yet
+        const appendStyle = () => {
+            if (document.head) {
+                document.head.appendChild(styleEl);
+            } else if (document.body) {
+                document.body.appendChild(styleEl);
+            } else {
+                // If neither head nor body is available, try again later
+                setTimeout(appendStyle, 10);
+            }
+        };
+        
+        appendStyle();
+    }
 
-        <div style="margin-bottom: 20px;">
-            <p style="margin: 0 0 5px 0; color: #A0A0A5; font-size: 12px;">Data Required</p>
-            <p style="margin: 0; font-size: 16px; font-weight: 500;">${dataRequired}</p>
-        </div>
-
-        <hr style="border: none; border-top: 1px solid #4A4A4E; margin: 20px 0;">
-
-        <div style="margin-bottom: 20px;">
-            <h4 style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">How it works</h4>
-            <div style="display: flex; align-items: flex-start; margin-bottom: 8px;">
-                <span style="background-color: #4A4A4E; color: #FFFFFF; border-radius: 4px; padding: 2px 6px; font-size: 12px; margin-right: 10px; line-height: 1.5;">1</span>
-                <p style="margin: 0; font-size: 13px; line-height: 1.5;">Log in to your [${providerName}.com] account.</p>
+    // Function to render the initial content
+    function renderInitialContent() {
+        popup.innerHTML = `
+            <div class="reclaim-popup-header">
+                <img class="reclaim-popup-logo" src="${chrome.runtime.getURL('assets/img/logo.png')}" alt="Reclaim Protocol">
+                <h3 class="reclaim-popup-title">Reclaim Protocol</h3>
             </div>
-            <div style="display: flex; align-items: flex-start;">
-                <span style="background-color: #4A4A4E; color: #FFFFFF; border-radius: 4px; padding: 2px 6px; font-size: 12px; margin-right: 10px; line-height: 1.5;">2</span>
-                <p style="margin: 0; font-size: 13px; line-height: 1.5;">Click "Verify" below.</p>
+
+            <div class="reclaim-popup-section">
+                <p class="reclaim-popup-label">Source</p>
+                <p class="reclaim-popup-value">${providerName}</p>
             </div>
-        </div>
 
-        <button id="hp-verify-button" style="width: 100%; padding: 12px; background-color: #007AFF; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; opacity: 0.5;" disabled>
-            Verify
-        </button>
-        <div id="hp-loader" style="display: none; text-align: center; margin-top: 10px;">
-            <!-- Basic CSS Loader -->
-            <style>
-                .hp-spinner {
-                    border: 3px solid #f3f3f3; 
-                    border-top: 3px solid #007AFF; 
-                    border-radius: 50%;
-                    width: 20px;
-                    height: 20px;
-                    animation: hp-spin 1s linear infinite;
-                    margin: 0 auto;
-                }
-                @keyframes hp-spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-            </style>
-            <div class="hp-spinner"></div>
-            <p style="font-size: 13px; color: #A0A0A5; margin-top: 5px;">Verifying...</p>
-        </div>
-         <div id="hp-success-message" style="display: none; text-align: center; margin-top: 10px; color: #34C759; font-size: 14px; font-weight: 500;">
-            Verification Successful!
-        </div>
-    `;
+            <div class="reclaim-popup-section">
+                <p class="reclaim-popup-label">Description</p>
+                <p class="reclaim-popup-value">${description}</p>
+            </div>
 
-    // Function to show loader and disable button
-    popup.showLoader = function() {
-        document.getElementById('hp-verify-button').style.display = 'none';
-        document.getElementById('hp-loader').style.display = 'block';
-    };
+            <div class="reclaim-popup-section">
+                <p class="reclaim-popup-label">Data Required</p>
+                <p class="reclaim-popup-value">${dataRequired}</p>
+            </div>
 
-    // Function to show success message
-    popup.showSuccess = function() {
-        document.getElementById('hp-loader').style.display = 'none';
-        document.getElementById('hp-success-message').style.display = 'block';
-    };
+            <div id="reclaim-steps-container" class="reclaim-steps-container">
+                <p class="reclaim-steps-title">How it works</p>
+                <div class="reclaim-step">
+                    <div class="reclaim-step-number">1</div>
+                    <div class="reclaim-step-text">Log in to your ${providerName} account.</div>
+                </div>
+                <div class="reclaim-step">
+                    <div class="reclaim-step-number">2</div>
+                    <div class="reclaim-step-text">Navigate to the Dashboard</div>
+                </div>
+            </div>
 
-    // Function to enable verify button
-    popup.enableVerifyButton = function() {
-        const button = document.getElementById('hp-verify-button');
-        button.disabled = false;
-        button.style.opacity = '1';
-        button.style.backgroundColor = '#007AFF'; // Active color
-    };
+            <div id="reclaim-status-container" class="reclaim-status-container" style="display: none; max-height: 0;">
+                <div id="reclaim-circular-loader" class="reclaim-circular-loader" style="display: none;">
+                    <svg viewBox="25 25 50 50">
+                        <circle cx="50" cy="50" r="20"></circle>
+                    </svg>
+                </div>
+                <div id="reclaim-status-progress" class="reclaim-status-progress" style="display: none;">
+                    <div class="reclaim-progress-row">
+                        <span id="reclaim-status-text" class="reclaim-status-text">Preparing verification...</span>
+                        <span id="reclaim-progress-counter" class="reclaim-progress-counter"></span>
+                    </div>
+                    <div class="reclaim-progress-bar-container">
+                        <div id="reclaim-progress-bar" class="reclaim-progress-bar"></div>
+                    </div>
+                </div>
+                <div id="reclaim-status-message" class="reclaim-status-message"></div>
+            </div>
+        `;
+    }
 
-    // Function to disable verify button
-    popup.disableVerifyButton = function() {
-        const button = document.getElementById('hp-verify-button');
-        button.disabled = true;
-        button.style.opacity = '0.5';
-        button.style.backgroundColor = '#007AFF'; // Keep color but use opacity to show disabled
-    };
+    // Function to show the loading state
+    function showLoader(message = "Generating verification proof...") {
+        const stepsContainer = popup.querySelector('#reclaim-steps-container');
+        const statusContainer = popup.querySelector('#reclaim-status-container');
+        const circularLoader = popup.querySelector('#reclaim-circular-loader');
+        const progressContainer = popup.querySelector('#reclaim-status-progress');
+        const statusText = popup.querySelector('#reclaim-status-text');
+        
+        // Hide the steps
+        if (stepsContainer) {
+            stepsContainer.style.display = 'none';
+        }
+        
+        // Show the status container and circular loader
+        statusContainer.style.display = 'block';
+        statusContainer.style.maxHeight = '200px';
+        circularLoader.style.display = 'flex';
+        progressContainer.style.display = 'block';
+        statusText.textContent = message;
+        
+        state.inProgress = true;
+        updateProgressBar();
+    }
 
-    // Function to update progress (placeholder for now)
-    // You might want to update a progress bar or text
-    popup.updateProgress = function(message) {
-        const loader = document.getElementById('hp-loader');
-        const progressText = loader.querySelector('p');
-        if (progressText) {
-            progressText.textContent = message;
+    // Function to update the progress bar
+    function updateProgressBar() {
+        const progressBar = popup.querySelector('#reclaim-progress-bar');
+        const progressCounter = popup.querySelector('#reclaim-progress-counter');
+        
+        if (state.totalClaims > 0) {
+            const percentage = Math.round((state.completedClaims / state.totalClaims) * 100);
+            progressBar.style.width = `${percentage}%`;
+            progressCounter.textContent = `${state.completedClaims}/${state.totalClaims}`;
+        } else {
+            progressBar.style.width = `100%`;
+            progressBar.style.animation = 'reclaim-progress-pulse 2s infinite';
+            progressCounter.textContent = '';
+        }
+    }
+
+    // Function to update status message
+    function updateStatusMessage(message, isError = false) {
+        const statusMessage = popup.querySelector('#reclaim-status-message');
+        statusMessage.textContent = message;
+        statusMessage.style.color = isError ? '#FF453A' : '#E0E0E5';
+    }
+
+    // Function to show success state
+    function showSuccess() {
+        const stepsContainer = popup.querySelector('#reclaim-steps-container');
+        const statusContainer = popup.querySelector('#reclaim-status-container');
+        const circularLoader = popup.querySelector('#reclaim-circular-loader');
+        const progressContainer = popup.querySelector('#reclaim-status-progress');
+        const statusText = popup.querySelector('#reclaim-status-text');
+        const progressBar = popup.querySelector('#reclaim-progress-bar');
+        
+        // Hide the steps if they're still visible
+        if (stepsContainer) {
+            stepsContainer.style.display = 'none';
+        }
+        
+        // Hide circular loader
+        circularLoader.style.display = 'none';
+        
+        // Show success UI
+        statusContainer.style.display = 'block';
+        statusContainer.style.maxHeight = '200px';
+        progressContainer.style.display = 'block';
+        statusText.textContent = "Verification complete!";
+        progressBar.style.width = '100%';
+        progressBar.classList.add('success');
+        progressBar.style.animation = 'none';
+        
+        updateStatusMessage("You will be redirected to the original page shortly.");
+        
+        // Add success animation if not already present
+        if (!popup.querySelector('.reclaim-status-icon')) {
+            const successIndicator = document.createElement('div');
+            successIndicator.className = 'reclaim-status-icon';
+            successIndicator.innerHTML = `
+                <div class="reclaim-icon-circle">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path class="reclaim-success-checkmark" d="M5 13L9 17L19 7" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+            `;
+            
+            statusContainer.insertBefore(successIndicator, statusContainer.firstChild);
+        }
+    }
+
+    // Function to show error state
+    function showError(errorMessage) {
+        const stepsContainer = popup.querySelector('#reclaim-steps-container');
+        const statusContainer = popup.querySelector('#reclaim-status-container');
+        const circularLoader = popup.querySelector('#reclaim-circular-loader');
+        const progressContainer = popup.querySelector('#reclaim-status-progress');
+        const statusText = popup.querySelector('#reclaim-status-text');
+        const progressBar = popup.querySelector('#reclaim-progress-bar');
+        
+        // Hide the steps if they're still visible
+        if (stepsContainer) {
+            stepsContainer.style.display = 'none';
+        }
+        
+        // Hide circular loader
+        circularLoader.style.display = 'none';
+        
+        // Show error UI
+        statusContainer.style.display = 'block';
+        statusContainer.style.maxHeight = '200px';
+        progressContainer.style.display = 'block';
+        statusText.textContent = "Verification failed";
+        progressBar.style.width = '100%';
+        progressBar.classList.add('error');
+        progressBar.style.animation = 'none';
+        
+        updateStatusMessage(errorMessage, true);
+        
+        // Add error icon if not already present
+        if (!popup.querySelector('.reclaim-status-icon')) {
+            const errorIndicator = document.createElement('div');
+            errorIndicator.className = 'reclaim-status-icon';
+            errorIndicator.innerHTML = `
+                <div class="reclaim-icon-circle error">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M18 6L6 18M6 6L18 18" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+            `;
+            
+            statusContainer.insertBefore(errorIndicator, statusContainer.firstChild);
+        }
+    }
+
+    // Function to increment the total claims count
+    function incrementTotalClaims() {
+        state.totalClaims += 1;
+        updateProgressBar();
+    }
+
+    // Function to increment the completed claims count
+    function incrementCompletedClaims() {
+        state.completedClaims += 1;
+        updateProgressBar();
+    }
+
+    // Expose the public API for the popup
+    return {
+        element: popup,
+        showLoader,
+        updateStatusMessage,
+        showSuccess,
+        showError,
+        incrementTotalClaims,
+        incrementCompletedClaims,
+        
+        // Handle various status updates from background
+        handleClaimCreationRequested: (requestHash) => {
+            incrementTotalClaims();
+            showLoader("Creating verification claim...");
+        },
+        
+        handleClaimCreationSuccess: (requestHash) => {
+            updateStatusMessage("Claim created successfully. Generating proof...");
+        },
+        
+        handleClaimCreationFailed: (requestHash) => {
+            showError("Failed to create claim. Please try again.");
+        },
+        
+        handleProofGenerationStarted: (requestHash) => {
+            updateStatusMessage("Generating cryptographic proof...");
+        },
+        
+        handleProofGenerationSuccess: (requestHash) => {
+            incrementCompletedClaims();
+            updateStatusMessage(`Proof generated (${state.completedClaims}/${state.totalClaims})`);
+        },
+        
+        handleProofGenerationFailed: (requestHash) => {
+            showError("Failed to generate proof. Please try again.");
+        },
+        
+        handleProofSubmitted: () => {
+            state.proofSubmitted = true;
+            showSuccess();
+        },
+        
+        handleProofSubmissionFailed: (error) => {
+            showError(`Failed to submit proof: ${error}`);
         }
     };
-
-    return popup;
 }
 
 // Example usage (for testing - remove later):
