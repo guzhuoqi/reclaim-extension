@@ -1,109 +1,320 @@
-# Reclaim Browser Extension SDK
+# Reclaim Browser Extension Template
 
-A browser extension for the Reclaim Protocol that enables users to generate zero-knowledge proofs from their web activity for credential verification.
+A comprehensive browser extension template built for the Reclaim Protocol ecosystem. This template provides a solid foundation for developers to create custom browser extensions that generate zero-knowledge proofs from web activity, enabling privacy-preserving credential verification.
 
-## Overview
+## 🎯 Purpose
 
-The Reclaim Browser Extension serves as a bridge between web services and the Reclaim Protocol. It enables users to generate cryptographic proofs of their data from various web providers without exposing the actual data, maintaining privacy while still allowing verification.
+This project serves as a **template and SDK** for developers who want to build browser extensions that integrate with the Reclaim Protocol. Rather than starting from scratch, you can fork this template, customize it for your specific use case, and add additional features on top of the robust foundation we've provided.
 
-## Features
+## 🏗️ Architecture Overview
 
-- **Privacy-Preserving Verification**: Generate zero-knowledge proofs from your web data without exposing the actual content
-- **Multi-Provider Support**: Works with multiple authentication providers including Google, GitHub, LinkedIn, and generic OAuth2 flows
-- **Network Request Monitoring**: Intelligently filters and captures relevant network requests during the verification process
-- **Proof Generation**: Creates cryptographic proofs using snarkjs for verification by the Reclaim Protocol
-- **Background Processing**: Runs silently in the background while you interact with provider websites
+![Architecture Diagram](docs/architecture-diagram.svg)
 
-## Installation
+The extension follows a modular architecture with three main layers:
 
-### From Source
+**Browser Extension Layer:**
+- **Popup UI**: Configuration interface, status display, and user controls
+- **Content Scripts**: DOM monitoring, custom script injection, and page interaction  
+- **Background Service Worker**: Network monitoring, proof orchestration, and state management
 
-1. Clone the repository:
+**Core Components Layer:**
+- **Network Filter**: Analyzes requests, extracts data, and processes responses
+- **Proof Generator**: Integrates with snarkjs for zero-knowledge proof creation
+- **Provider Handlers**: Custom JavaScript files (providerId.js) for provider-specific logic
+
+**Integration:**
+- All components work together to generate cryptographic proofs that are verified by the Reclaim Protocol without exposing the underlying user data.
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 16+ 
+- npm or yarn
+- Modern browser (Chrome/Firefox/Edge)
+
+### Installation & Setup
+
+1. **Clone the template**:
+   ```bash
+   git clone https://github.com/your-org/reclaim-extension-template.git
+   cd reclaim-extension-template
    ```
-   git clone https://github.com/reclaim-network/reclaim-sdk-extension.git
-   ```
 
-2. Install dependencies:
-   ```
+2. **Install dependencies**:
+   ```bash
    npm install
    ```
 
-3. Build the extension:
+3. **Development mode** (with hot reload):
+   ```bash
+   npm run dev
    ```
+
+4. **Production build**:
+   ```bash
    npm run build
    ```
 
-4. Load the extension in your browser:
-   - Chrome: Go to `chrome://extensions/`, enable Developer mode, click "Load unpacked", and select the `build` directory
-   - Firefox: Go to `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on", and select any file in the `build` directory
+5. **Load in browser**:
+   - **Chrome**: Navigate to `chrome://extensions/` → Enable Developer Mode → Load Unpacked → Select `build/` folder
+   - **Firefox**: Navigate to `about:debugging` → This Firefox → Load Temporary Add-on → Select any file in `build/`
 
-### Development Mode
-
-To run the extension in development mode with hot reloading:
+## 📁 Project Structure
 
 ```
+src/
+├── background/           # Background service worker
+│   ├── index.js         # Main background script
+│   └── networkFilter.js # Network request filtering
+├── content/             # Content scripts for web pages
+│   ├── index.js         # Main content script
+│   └── injector.js      # Custom script injection
+├── popup/               # Extension popup interface  
+│   ├── index.html       # Popup HTML structure
+│   ├── popup.js         # Popup functionality
+│   └── styles.css       # Popup styling
+├── providers/           # Custom provider implementations
+│   ├── google.js        # Google OAuth provider
+│   ├── github.js        # GitHub provider  
+│   └── [providerId].js  # Add your custom providers here
+├── utils/               # Utility functions
+│   ├── proofGenerator.js# ZK proof generation
+│   ├── storage.js       # Extension storage management
+│   └── polyfills.js     # Node.js browser polyfills
+├── lib/                 # Third-party libraries
+└── assets/              # Icons, images, static files
+    ├── icons/
+    └── images/
+```
+
+## 🎨 UI Customization & Styling
+
+The extension UI is fully customizable to match your brand and requirements.
+
+### Popup Interface Customization
+
+**Location**: `src/popup/`
+
+```css
+/* src/popup/styles.css - Customize the popup appearance */
+:root {
+  --primary-color: #your-brand-color;
+  --secondary-color: #your-secondary-color;
+  --background: #your-background;
+  --text-color: #your-text-color;
+}
+
+.popup-container {
+  /* Modify dimensions, colors, layout */
+  width: 400px;
+  min-height: 500px;
+}
+```
+
+**Key Customization Points**:
+- **Colors & Branding**: Update CSS variables in `styles.css`
+- **Layout**: Modify `index.html` structure
+- **Interactions**: Extend `popup.js` for custom functionality
+- **Animations**: Add CSS transitions and animations
+- **Dark/Light Modes**: Implement theme switching
+
+### Content Script Styling
+
+**Location**: `src/content/`
+
+Customize how the extension interacts with web pages:
+
+```javascript
+// src/content/index.js - Customize injected UI elements
+const createOverlay = () => {
+  const overlay = document.createElement('div');
+  overlay.className = 'reclaim-overlay'; // Style this in your CSS
+  // Add your custom styling and functionality
+};
+```
+
+## 🔧 Core Components Deep Dive
+
+### 1. Network Filter (`src/background/networkFilter.js`)
+
+Monitors and filters network requests to extract verification data:
+
+```javascript
+class NetworkFilter {
+  constructor() {
+    this.activeFilters = new Map();
+  }
+  
+  // Add custom filtering logic for your providers
+  addProviderFilter(providerId, filterConfig) {
+    // Implement your custom network filtering
+  }
+}
+```
+
+### 2. Proof Generator (`src/utils/proofGenerator.js`)
+
+Handles zero-knowledge proof creation using snarkjs:
+
+```javascript
+class ProofGenerator {
+  async generateProof(data, providerConfig) {
+    // Customize proof generation logic
+    // Add support for different proof systems
+  }
+}
+```
+
+### 3. Provider System (`src/providers/`)
+
+Extensible provider system for different web services.
+
+## 🔌 Custom Provider Implementation
+
+### Adding New Providers
+
+Create a new file `src/providers/[providerId].js`:
+
+```javascript
+// src/providers/twitter.js (example)
+class TwitterProvider {
+  constructor() {
+    this.providerId = 'twitter';
+    this.name = 'Twitter';
+    this.baseUrl = 'https://twitter.com';
+  }
+
+  // Define custom extraction logic
+  async extractData(request, response) {
+    // Your custom data extraction logic
+    return {
+      username: extractedUsername,
+      followers: extractedFollowers,
+      // ... other relevant data
+    };
+  }
+
+  // Define verification parameters
+  getVerificationConfig() {
+    return {
+      url: this.baseUrl,
+      method: 'GET',
+      headers: { /* custom headers */ },
+      // ... other config
+    };
+  }
+
+  // Custom JavaScript injection (optional)
+  getCustomScript() {
+    return `
+      // Custom JavaScript to be injected into the provider's page
+      // This script can help with authentication flows, data extraction, etc.
+      console.log('Twitter provider script loaded');
+      
+      // Example: Listen for specific events
+      document.addEventListener('customTwitterEvent', (e) => {
+        // Handle provider-specific events
+      });
+    `;
+  }
+}
+
+module.exports = TwitterProvider;
+```
+
+### Custom JavaScript Injections
+
+For providers requiring custom JavaScript execution on their pages:
+
+1. **File Naming Convention**: `src/providers/[providerId].js`
+2. **Automatic Loading**: The extension automatically loads and injects scripts based on provider ID
+3. **Scope**: Injected scripts have access to the provider's page DOM and can interact with their APIs
+
+**Example injection workflow**:
+```javascript
+// The extension automatically looks for and loads:
+// src/providers/google.js     → for Google OAuth flows  
+// src/providers/github.js     → for GitHub verification
+// src/providers/linkedin.js   → for LinkedIn data
+// src/providers/[your-provider].js → for your custom provider
+```
+
+## 🛠️ Development Workflow
+
+### Adding New Features
+
+1. **Identify Extension Point**: Determine where your feature fits (background, content, popup, or provider)
+2. **Extend Base Classes**: Inherit from existing components where possible
+3. **Add Provider Logic**: Create custom provider files if needed
+4. **Update Manifest**: Add any new permissions or resources
+5. **Test Thoroughly**: Test across different browsers and scenarios
+
+### Testing Your Extension
+
+```bash
+# Run development server
 npm run dev
+
+# Run tests (add your test framework)
+npm test
+
+# Build for production
+npm run build
+
+# Package for distribution
+npm run package
 ```
 
-## Usage
+### Browser-Specific Considerations
 
-The extension is designed to work with applications that use the Reclaim Protocol. When a Reclaim-enabled application requests verification, the extension will:
+The template includes polyfills for Node.js modules to ensure compatibility:
 
-1. Open the provider's login page in a new tab
-2. Monitor network requests for authentication data
-3. Extract relevant fields for proof generation
-4. Generate a zero-knowledge proof
-5. Submit the proof back to the application
+- **Webpack Configuration**: `webpack.config.js` handles module resolution
+- **Polyfills**: `src/utils/polyfills.js` provides browser compatibility
+- **Manifest V3**: Built for modern extension standards
 
-## Permissions
+## 📦 Distribution & Deployment
 
-The extension requires the following permissions:
+### Extension Store Preparation
 
-- `storage`: To store session data
-- `webRequest`: To monitor network requests
-- `activeTab`: To interact with the active tab
-- `webNavigation`: To track navigation events
-- `scripting`: To inject scripts when needed
-- `tabs`: To manage tabs during the verification process
+1. Update `manifest.json` with your extension details
+2. Prepare store assets (icons, screenshots, descriptions)
+3. Test thoroughly across target browsers
+4. Submit to respective extension stores
 
-## Development
+## 🔒 Security & Privacy
 
-### Project Structure
+- **Zero-Knowledge Proofs**: Data verification without exposure
+- **Local Processing**: Sensitive operations happen locally
+- **Minimal Permissions**: Only essential browser permissions requested
+- **Secure Storage**: Encrypted local storage for sensitive data
 
-- `/src`: Source code
-  - `/background`: Background service worker scripts
-  - `/content`: Content scripts injected into web pages
-  - `/popup`: Extension popup UI
-  - `/utils`: Utility functions and classes
-  - `/lib`: Libraries and third-party code
-  - `/assets`: Images and other static assets
+## 🤝 Contributing to the Template
 
-### Polyfills for Node.js Modules
+We welcome contributions that improve the template for all developers:
 
-The extension uses several Node.js polyfills to support libraries like `@reclaimprotocol/attestor-core` in the browser environment. These polyfills are implemented through:
+1. Fork the repository
+2. Create a feature branch
+3. Add comprehensive tests
+4. Update documentation
+5. Submit a pull request
 
-1. **Node Polyfill Webpack Plugin**: Automatically provides polyfills for Node.js core modules
-2. **Custom polyfill file**: Located at `src/utils/polyfills.js`, this handles specific browser-Node.js compatibility issues
-3. **Webpack resolve.fallback**: Configures specific polyfills for Node.js core modules
+## 📚 Resources & Documentation
 
-When adding new Node.js-dependent libraries, you may need to update the polyfill configuration in:
-- webpack.config.js
-- src/utils/polyfills.js
+- [Reclaim Protocol Documentation](https://docs.reclaimprotocol.org)
+- [Browser Extension APIs](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions)
+- [snarkjs Documentation](https://github.com/iden3/snarkjs)
 
-### Key Components
+## 🆘 Support & Community
 
-- **NetworkFilter**: Filters and analyzes network requests to extract verification data
-- **ProofGenerator**: Generates zero-knowledge proofs using snarkjs
-- **ReclaimExtensionManager**: Manages the extension's lifecycle and coordinates verification flows
+- **Issues**: [GitHub Issues](https://github.com/your-org/reclaim-extension-template/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/reclaim-extension-template/discussions)  
+- **Documentation**: [Full Documentation Site](https://docs.reclaimprotocol.org/extensions)
 
-## Contributing
+## 📄 License
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+MIT License - see [LICENSE](LICENSE) file for details.
 
-## License
+---
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contact
-
-For more information about Reclaim Protocol, visit [reclaimprotocol.org](https://reclaimprotocol.org) 
+**🚀 Ready to build your privacy-preserving browser extension? Start by forking this template and customizing it for your use case!**
