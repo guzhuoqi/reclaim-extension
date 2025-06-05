@@ -171,56 +171,26 @@ Extensible provider system for different web services.
 
 ## 🔌 Custom Provider Implementation
 
-### Adding New Providers
+### Creating Custom Providers with DevTool
 
-Create a new file `src/providers/[providerId].js`:
+The easiest way to add new providers is using our **[Developer Tool](https://dev.reclaimprotocol.org)** 🛠️
 
-```javascript
-// src/providers/twitter.js (example)
-class TwitterProvider {
-  constructor() {
-    this.providerId = 'twitter';
-    this.name = 'Twitter';
-    this.baseUrl = 'https://twitter.com';
-  }
+**Step-by-step process:**
 
-  // Define custom extraction logic
-  async extractData(request, response) {
-    // Your custom data extraction logic
-    return {
-      username: extractedUsername,
-      followers: extractedFollowers,
-      // ... other relevant data
-    };
-  }
+1. **Create Your Provider**
+   - Visit the [Dev Tool](https://dev.reclaimprotocol.org)
+   - Design a custom provider for any website or service you want to verify
+   - Configure the data extraction rules and verification parameters
 
-  // Define verification parameters
-  getVerificationConfig() {
-    return {
-      url: this.baseUrl,
-      method: 'GET',
-      headers: { /* custom headers */ },
-      // ... other config
-    };
-  }
+2. **Set Up Your Application**
+   - Create a new application in the Dev Tool
+   - This generates the necessary configuration for your extension
 
-  // Custom JavaScript injection (optional)
-  getCustomScript() {
-    return `
-      // Custom JavaScript to be injected into the provider's page
-      // This script can help with authentication flows, data extraction, etc.
-      console.log('Twitter provider script loaded');
-      
-      // Example: Listen for specific events
-      document.addEventListener('customTwitterEvent', (e) => {
-        // Handle provider-specific events
-      });
-    `;
-  }
-}
+3. **Integrate with Your Extension**
+   - Use our [JavaScript SDK](https://github.com/reclaimprotocol/reclaim-js-sdk) to connect your application
+   - The SDK will automatically trigger this browser extension when users need verification
 
-module.exports = TwitterProvider;
-```
+**What this achieves:** Your users can seamlessly verify credentials from any web service while keeping their data private through zero-knowledge proofs.
 
 ### Custom JavaScript Injections
 
@@ -233,8 +203,6 @@ For providers requiring custom JavaScript execution on their pages:
 **Example injection workflow**:
 ```javascript
 // The extension automatically looks for and loads:
-// src/providers/google.js     → for Google OAuth flows  
-// src/providers/github.js     → for GitHub verification
 // src/providers/linkedin.js   → for LinkedIn data
 // src/providers/[your-provider].js → for your custom provider
 ```
