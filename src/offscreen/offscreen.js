@@ -5,13 +5,11 @@ import { createClaimOnAttestor } from '@reclaimprotocol/attestor-core';
 // Import our specialized WebSocket implementation for offscreen document
 import { WebSocket } from '../utils/offscreen-websocket';
 import { updateSessionStatus } from '../utils/fetch-calls'
-
-// Preload p-queue to prevent dynamic chunk loading issues
-import PQueue from 'p-queue';
+import { debugLogger, DebugLogType } from '../utils/logger';
 
 // Ensure WebAssembly is available
 if (typeof WebAssembly === 'undefined') {
-  console.error('[OFFSCREEN] WebAssembly is not available in this browser context');
+   debugLogger.error(DebugLogType.OFFSCREEN, 'WebAssembly is not available in this browser context');
 }
 
 // Set WASM path to the extension's public path
@@ -57,7 +55,7 @@ class OffscreenProofGenerator {
     if (target !== MESSAGE_SOURCES.OFFSCREEN) return;
 
     switch (action) {
-      case 'PING_OFFSCREEN':
+      case MESSAGE_ACTIONS.PING_OFFSCREEN:
         this.sendReadySignal();
         sendResponse({ success: true });
         break;

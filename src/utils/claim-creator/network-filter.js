@@ -1,5 +1,6 @@
 // Import shared utility functions
 import { getValueFromJsonPath, getValueFromXPath, isJsonFormat, safeJsonParse } from './params-extractor-utils.js';
+import { debugLogger, DebugLogType } from '../logger';
 
 // Escape special regex characters in string
 function escapeSpecialCharacters(input) {
@@ -148,7 +149,7 @@ function matchesResponseFields(responseText, responseRedactions) {
         // If we get here but value is undefined, the path doesn't exist
         if (value === undefined || value === null) return false;
       } catch (error) {
-        console.error(`[NETWORK-FILTER] Error checking jsonPath ${redaction.jsonPath}:`, error);
+        debugLogger.error(DebugLogType.CLAIM, `[NETWORK-FILTER] Error checking jsonPath ${redaction.jsonPath}:`, error);
         return false;
       }
     }
@@ -158,7 +159,7 @@ function matchesResponseFields(responseText, responseRedactions) {
         const value = getValueFromXPath(responseText, redaction.xPath);
         if (!value) return false;
       } catch (error) {
-        console.error(`[NETWORK-FILTER] Error checking xPath ${redaction.xPath}:`, error);
+        debugLogger.error(DebugLogType.CLAIM, `[NETWORK-FILTER] Error checking xPath ${redaction.xPath}:`, error);
         return false;
       }
     }
@@ -168,7 +169,7 @@ function matchesResponseFields(responseText, responseRedactions) {
         const regex = new RegExp(redaction.regex);
         if (!regex.test(responseText)) return false;
       } catch (error) {
-        console.error(`[NETWORK-FILTER] Error checking regex ${redaction.regex}:`, error);
+        debugLogger.error(DebugLogType.CLAIM, `[NETWORK-FILTER] Error checking regex ${redaction.regex}:`, error);
         return false;
       }
     }
@@ -204,7 +205,7 @@ export const filterRequest = (request, filterCriteria, parameters = {}) => {
 
     return true;
   } catch (error) {
-    console.error('Error filtering request:', error);
+    debugLogger.error(DebugLogType.CLAIM, '[NETWORK-FILTER] Error filtering request:', error);
     return false;
   }
 };

@@ -6,6 +6,7 @@ import {
 } from './params-extractor';
 import { MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../constants';
 import { ensureOffscreenDocument } from '../offscreen-manager';
+import { debugLogger, DebugLogType } from '../logger';
 
 // Generate Chrome Android user agent (adapted from reference code)
 const generateChromeAndroidUserAgent = (chromeMajorVersion = 135, isMobile = true) => {
@@ -40,10 +41,10 @@ const getPrivateKeyFromOffscreen = () => {
                 chrome.runtime.onMessage.removeListener(messageListener);
 
                 if (message.success && message.privateKey) {
-                    console.log('[CLAIM-CREATOR] Received private key from offscreen document');
+                    debugLogger.info(DebugLogType.CLAIM, '[CLAIM-CREATOR] Received private key from offscreen document');
                     resolve(message.privateKey);
                 } else {
-                    console.error('[CLAIM-CREATOR] Failed to get private key from offscreen:', message.error);
+                    debugLogger.error(DebugLogType.CLAIM, '[CLAIM-CREATOR] Failed to get private key from offscreen:', message.error);
                     reject(new Error(message.error || 'Unknown error getting private key from offscreen document.'));
                 }
                 return false; // Indicate message has been handled
@@ -53,7 +54,7 @@ const getPrivateKeyFromOffscreen = () => {
 
         chrome.runtime.onMessage.addListener(messageListener);
 
-        console.log('[CLAIM-CREATOR] Requesting private key from offscreen document');
+        debugLogger.info(DebugLogType.CLAIM, '[CLAIM-CREATOR] Requesting private key from offscreen document');
         chrome.runtime.sendMessage({
             action: MESSAGE_ACTIONS.GET_PRIVATE_KEY,
             source: MESSAGE_SOURCES.BACKGROUND, // Assuming this script runs in background context
@@ -62,7 +63,7 @@ const getPrivateKeyFromOffscreen = () => {
             if (chrome.runtime.lastError) {
                 clearTimeout(callTimeout);
                 chrome.runtime.onMessage.removeListener(messageListener);
-                console.error('[CLAIM-CREATOR] Error sending GET_PRIVATE_KEY message:', chrome.runtime.lastError.message);
+                debugLogger.error(DebugLogType.CLAIM, '[CLAIM-CREATOR] Error sending GET_PRIVATE_KEY message:', chrome.runtime.lastError.message);
                 reject(new Error(`Error sending message to offscreen document: ${chrome.runtime.lastError.message}`));
             }
             // If offscreen.js calls sendResponse synchronously, it can be handled here
@@ -72,15 +73,15 @@ const getPrivateKeyFromOffscreen = () => {
 };
 
 export const createClaimObject = async (request, providerData, sessionId, loginUrl) => {
-    console.log('[CLAIM-CREATOR] Creating claim object from request data');
+    debugLogger.info(DebugLogType.CLAIM, '[CLAIM-CREATOR] Creating claim object from request data');
     
     // Ensure offscreen document is ready
     try {
-        console.log('[CLAIM-CREATOR] Ensuring offscreen document is ready...');
+        debugLogger.info(DebugLogType.CLAIM, '[CLAIM-CREATOR] Ensuring offscreen document is ready...');
         await ensureOffscreenDocument();
-        console.log('[CLAIM-CREATOR] Offscreen document is ready.');
+        debugLogger.info(DebugLogType.CLAIM, '[CLAIM-CREATOR] Offscreen document is ready.');
     } catch (error) {
-        console.error('[CLAIM-CREATOR] Failed to ensure offscreen document:', error);
+        debugLogger.error(DebugLogType.CLAIM, '[CLAIM-CREATOR] Failed to ensure offscreen document:', error);
         // Depending on requirements, you might want to throw error or handle differently
         throw new Error(`Failed to initialize offscreen document: ${error.message}`);
     }
@@ -113,7 +114,7 @@ export const createClaimObject = async (request, providerData, sessionId, loginU
     
     // Process headers - split between public and secret
     if (request.headers) {
-        console.log('request.headers: ', request.headers);
+        debugLogger.info(DebugLogType.CLAIM, '[CLAIM-CREATOR] request.headers: ', request.headers);
         const publicHeaders = {
             'Sec-Fetch-Mode': 'same-origin',
             'Sec-Fetch-Site': 'same-origin',
@@ -259,7 +260,7 @@ export const createClaimObject = async (request, providerData, sessionId, loginU
     try {
         ownerPrivateKey = await getPrivateKeyFromOffscreen();
     } catch (error) {
-        console.error('[CLAIM-CREATOR] Could not obtain private key:', error);
+        debugLogger.error(DebugLogType.CLAIM, '[CLAIM-CREATOR] Could not obtain private key:', error);
         // Fallback or re-throw, depending on how critical the key is.
         // For now, let's re-throw to make the failure visible.
         throw new Error(`Could not obtain owner private key: ${error.message}`);
@@ -277,7 +278,7 @@ export const createClaimObject = async (request, providerData, sessionId, loginU
         }
     };
     
-    console.log('[CLAIM-CREATOR] Claim object created successfully');
+    debugLogger.info(DebugLogType.CLAIM, '[CLAIM-CREATOR] Claim object created successfully');
     
     return claimObject;
 };

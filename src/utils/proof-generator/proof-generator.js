@@ -3,11 +3,12 @@ import '../polyfills';
 
 import { MESSAGE_ACTIONS, MESSAGE_SOURCES } from '../constants/index';
 import { ensureOffscreenDocument } from '../offscreen-manager';
+import { debugLogger, DebugLogType } from '../logger';
 
 // Main function to generate proof using offscreen document
 export const generateProof = async (claimData) => {
   try {
-    console.log('[PROOF-GENERATOR] Starting proof generation with data:', claimData);
+    debugLogger.info(DebugLogType.PROOF, '[PROOF-GENERATOR] Starting proof generation with data:', claimData);
     if(!claimData) {
       throw new Error('No claim data provided for proof generation');
     }
@@ -17,7 +18,7 @@ export const generateProof = async (claimData) => {
     // Generate the proof using the offscreen document
     return new Promise((resolve, reject) => {
       const messageTimeout = setTimeout(() => {
-        console.error('[PROOF-GENERATOR] Timeout waiting for offscreen document to generate proof');
+        debugLogger.error(DebugLogType.PROOF, '[PROOF-GENERATOR] Timeout waiting for offscreen document to generate proof');
         reject({
           success: false,
           error: 'Timeout waiting for offscreen document to generate proof'
@@ -36,7 +37,7 @@ export const generateProof = async (claimData) => {
 
           // Check if the proof generation was successful
           if (!response.success) {
-            console.error('[PROOF-GENERATOR] Proof generation failed:', response.error);
+            debugLogger.error(DebugLogType.PROOF, '[PROOF-GENERATOR] Proof generation failed:', response.error);
             resolve({
               success: false,
               error: response.error || 'Unknown error in proof generation'
@@ -45,7 +46,7 @@ export const generateProof = async (claimData) => {
           }
 
           // Return the successful response
-          console.log('[PROOF-GENERATOR] Proof generation successful');
+          debugLogger.info(DebugLogType.PROOF, '[PROOF-GENERATOR] Proof generation successful');
           resolve(response);
         }
       };
@@ -59,11 +60,11 @@ export const generateProof = async (claimData) => {
         source: MESSAGE_SOURCES.BACKGROUND,
         target: MESSAGE_SOURCES.OFFSCREEN,
         data: claimData
-      }, (sendResponse) => {
+      }, () => {
         if (chrome.runtime.lastError) {
           clearTimeout(messageTimeout);
           chrome.runtime.onMessage.removeListener(messageListener);
-          console.error('[PROOF-GENERATOR] Error sending message to offscreen document:', chrome.runtime.lastError);
+          debugLogger.error(DebugLogType.PROOF, '[PROOF-GENERATOR] Error sending message to offscreen document:', chrome.runtime.lastError);
           reject({
             success: false,
             error: chrome.runtime.lastError.message || 'Error communicating with offscreen document'
@@ -72,7 +73,7 @@ export const generateProof = async (claimData) => {
       });
     });
   } catch (error) { 
-    console.error('[PROOF-GENERATOR] Error in proof generation process:', error);
+    debugLogger.error(DebugLogType.PROOF, '[PROOF-GENERATOR] Error in proof generation process:', error);
     return {
       success: false,
       error: error.message || 'Unknown error in proof generation process'

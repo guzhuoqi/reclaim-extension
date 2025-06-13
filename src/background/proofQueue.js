@@ -1,6 +1,8 @@
 // Proof generation queue for background script
 // Handles the proof generation queue and related logic
 
+import { debugLogger, DebugLogType } from '../utils/logger';
+
 export function addToProofGenerationQueue(ctx, claimData, requestHash) {
     ctx.proofGenerationQueue.push({
         claimData,
@@ -75,7 +77,7 @@ export async function processNextQueueItem(ctx) {
             ctx.sessionTimerManager.resetSessionTimer();
         }
     } catch (error) {
-        console.error('[BACKGROUND] Error processing proof generation queue item:', error);
+        debugLogger.error(DebugLogType.BACKGROUND, 'Error processing proof generation queue item:', error);
         ctx.loggerService.logError({
             error: `Proof generation failed for request hash: ${task.requestHash}`,
             type: ctx.LOG_TYPES.BACKGROUND,
