@@ -63,28 +63,66 @@ The extension follows a modular architecture with three main layers:
 
 ```
 src/
-├── background/           # Background service worker
-│   ├── index.js         # Main background script
-│   └── networkFilter.js # Network request filtering
-├── content/             # Content scripts for web pages
-│   ├── index.js         # Main content script
-│   └── injector.js      # Custom script injection
-├── popup/               # Extension popup interface  
-│   ├── index.html       # Popup HTML structure
-│   ├── popup.js         # Popup functionality
-│   └── styles.css       # Popup styling
-├── providers/           # Custom provider implementations
-│   ├── google.js        # Google OAuth provider
-│   ├── github.js        # GitHub provider  
-│   └── [providerId].js  # Add your custom providers here
-├── utils/               # Utility functions
-│   ├── proofGenerator.js# ZK proof generation
-│   ├── storage.js       # Extension storage management
-│   └── polyfills.js     # Node.js browser polyfills
-├── lib/                 # Third-party libraries
-└── assets/              # Icons, images, static files
-    ├── icons/
-    └── images/
+├── assets/                # Icons, images, static files
+│   └── img/               # Logo and other images
+├── background/            # Background service worker and related logic
+│   ├── background.js
+│   ├── messageRouter.js
+│   ├── sessionManager.js
+│   ├── proofQueue.js
+│   ├── tabManager.js
+│   ├── cookieUtils.js
+│   ├── types.js
+│   └── README.md
+├── content/               # Content scripts for web pages
+│   ├── content.js
+│   └── components/
+│       └── ProviderVerificationPopup.js
+├── interceptor/           # Network interception logic
+│   └── network-interceptor.js
+├── js-scripts/            # Custom JS scripts for injection
+│   ├── sample.js
+│   └── 8f8f3def-7864-4dae-890d-9e95c5e45bec.js
+├── offscreen/             # Offscreen document and scripts
+│   ├── offscreen.html
+│   └── offscreen.js
+├── utils/                 # Utility functions and helpers
+│   ├── polyfills.js
+│   ├── offscreen-manager.js
+│   ├── session-timer.js
+│   ├── fetch-calls.js
+│   ├── websocket-polyfill.js
+│   ├── polyfill-test.js
+│   ├── offscreen-websocket.js
+│   ├── logger/
+│   │   ├── index.js
+│   │   ├── debugLogger.js
+│   │   ├── LogEntry.js
+│   │   ├── LoggerService.js
+│   │   ├── constants.js
+│   │   └── README.md
+│   ├── proof-generator/
+│   │   ├── proof-generator.js
+│   │   ├── proof-formatter.js
+│   │   └── index.js
+│   ├── constants/
+│   │   ├── constants.js
+│   │   ├── interfaces.js
+│   │   └── index.js
+│   ├── claim-creator/
+│   │   ├── claim-creator.js
+│   │   ├── claim-creator.test.js
+│   │   ├── index.js
+│   │   ├── network-filter.js
+│   │   ├── params-extractor.js
+│   │   ├── params-extractor-utils.js
+│   │   └── replay-request.js
+│   └── mocks/
+│       ├── jsdom-mock.js
+│       ├── koffi-mock.js
+│       ├── re2-mock.js
+│       └── worker-threads-mock.js
+└── manifest.json          # Extension manifest
 ```
 
 ## 🎨 UI Customization & Styling
