@@ -93,7 +93,7 @@ ctx.processFilteredRequest = async function(request, criteria, sessionId, loginU
         try {
             claimData = await ctx.createClaimObject(request, criteria, sessionId, loginUrl);
         } catch (error) {
-            console.error('[BACKGROUND] Error creating claim object:', error);
+            debugLogger.error(DebugLogType.BACKGROUND, 'Error creating claim object:', error);
             chrome.tabs.sendMessage(ctx.activeTabId, {
                 action: ctx.MESSAGE_ACTIONS.CLAIM_CREATION_FAILED,
                 source: ctx.MESSAGE_SOURCES.BACKGROUND,
@@ -122,7 +122,7 @@ ctx.processFilteredRequest = async function(request, criteria, sessionId, loginU
         proofQueue.addToProofGenerationQueue(ctx, claimData, criteria.requestHash);
         return { success: true, message: "Proof generation queued" };
     } catch (error) {
-        console.error('[BACKGROUND] Error processing filtered request:', error);
+        debugLogger.error(DebugLogType.BACKGROUND, 'Error processing filtered request:', error);
         ctx.failSession("Error processing request: " + error.message, criteria.requestHash);
         return { success: false, error: error.message };
     }

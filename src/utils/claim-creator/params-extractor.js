@@ -1,6 +1,7 @@
 // Utility functions for parameter extraction from various sources
 import { convertTemplateToRegex } from './network-filter';
 import { getValueFromJsonPath, getValueFromXPath, isJsonFormat, safeJsonParse } from './params-extractor-utils.js';
+import { debugLogger, DebugLogType } from '../logger';
 
 /**
  * Extract dynamic parameters from a string by matching {{PARAM_NAME}} patterns
@@ -142,7 +143,7 @@ export const extractParamsFromResponse = (responseText, responseMatches, respons
             }
         }
     } catch (error) {
-        console.error("[PARAM-EXTRACTOR] Error extracting params from response:", error);
+        debugLogger.error(DebugLogType.CLAIM, "[PARAM-EXTRACTOR] Error extracting params from response:", error);
     }
 
     return paramValues;

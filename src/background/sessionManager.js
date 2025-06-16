@@ -232,16 +232,12 @@ export async function submitProofs(ctx) {
             throw error;
         }
 
-        chrome.tabs.sendMessage(ctx.activeTabId, {
-            action: ctx.MESSAGE_ACTIONS.PROOF_SUBMITTED,
-            source: ctx.MESSAGE_SOURCES.BACKGROUND,
-            target: ctx.MESSAGE_SOURCES.CONTENT_SCRIPT,
-        });
-
         if (ctx.activeTabId) {
             try {
                 await chrome.tabs.sendMessage(ctx.activeTabId, {
-                    action: 'PROOF_SUBMITTED',
+                    action: ctx.MESSAGE_ACTIONS.PROOF_SUBMITTED,
+                    source: ctx.MESSAGE_SOURCES.BACKGROUND,
+                    target: ctx.MESSAGE_SOURCES.CONTENT_SCRIPT,
                     data: { formattedProofs }
                 });
             } catch (error) {

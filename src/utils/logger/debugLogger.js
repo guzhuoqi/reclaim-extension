@@ -12,6 +12,8 @@ export const DebugLogType = Object.freeze({
   CLAIM: 'claim',
   PROOF: 'proof',
   OFFSCREEN: 'offscreen',
+  POLYFILLS: 'polyfills',
+  SESSION_TIMER: 'session-timer',
 });
 
 class DebugLogger {
@@ -82,6 +84,8 @@ class DebugLogger {
       claim: '#7FDBFF',
       proof: '#85144b',
       offscreen: '#AAAAAA',
+      polyfills: '#0074D9',
+      'session-timer': '#2ECC40',
     };
     const levelColors = {
       info: '', // default, use type color

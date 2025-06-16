@@ -59,6 +59,65 @@ The extension follows a modular architecture with three main layers:
    - **Chrome**: Navigate to `chrome://extensions/` → Enable Developer Mode → Load Unpacked → Select `build/` folder
    - **Firefox**: Navigate to `about:debugging` → This Firefox → Load Temporary Add-on → Select any file in `build/`
 
+## 🔄 Provider Setup
+
+The extension includes an automated provider setup system that fetches the latest provider configurations and JavaScript injection scripts from the Reclaim Protocol API.
+
+### Available Scripts
+
+```bash
+# Fetch latest providers and generate injection scripts
+npm run setup:providers
+
+# Build extension for development
+npm run dev
+
+# Build extension for production  
+npm run build
+```
+
+### Provider Setup Details
+
+The `setup:providers` command:
+
+- **Fetches Active Providers**: Connects to `https://api.reclaimprotocol.org/api/providers/active`
+- **Processes 20,000+ Providers**: Automatically handles the complete provider registry
+- **Generates Injection Scripts**: Creates JavaScript files in `src/js-scripts/` for providers with custom injections
+- **Smart Updates**: Only updates files when content changes, skips unnecessary writes
+- **Detailed Logging**: Shows created, updated, and unchanged file counts
+
+### Usage Workflow
+
+**For Development:**
+```bash
+# Update providers when needed
+npm run setup:providers
+
+# Start development
+npm run dev
+```
+
+**For Production:**
+```bash
+# Ensure latest providers  
+npm run setup:providers
+
+# Build for production
+npm run build
+```
+
+### Generated Files
+
+Provider injection scripts are automatically generated in:
+```
+src/js-scripts/
+├── [provider-id-1].js    # Custom injection for provider 1
+├── [provider-id-2].js    # Custom injection for provider 2
+└── ...                   # One file per provider with custom injection
+```
+
+These files are automatically loaded by the extension when users interact with their respective provider websites.
+
 ## 📁 Project Structure
 
 ```
