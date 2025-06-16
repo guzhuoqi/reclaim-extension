@@ -59,11 +59,13 @@ export function createProviderVerificationPopup(providerName, description, dataR
               z-index: 9999;
               box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.25);
               font-size: 14px;
-              transition: all 0.3s ease;
               opacity: 1;
               transform: translateY(0);
-              backdrop-filter: blur(10px);
-              -webkit-backdrop-filter: blur(10px);
+              /* Reduce layout thrashing by using transform instead of changing dimensions */
+              will-change: transform, opacity;
+              /* Disable backdrop filter to reduce ResizeObserver triggers */
+              /* backdrop-filter: blur(10px); */
+              /* -webkit-backdrop-filter: blur(10px); */
             }
             
             .reclaim-popup-header {
@@ -104,6 +106,16 @@ export function createProviderVerificationPopup(providerName, description, dataR
               margin-top: 20px;
               padding-top: 15px;
               border-top: 1px solid #3A3A3C;
+              /* Use transform instead of max-height for better performance */
+              transform: translateY(0);
+              opacity: 1;
+              will-change: transform, opacity;
+            }
+            
+            .reclaim-steps-container.hidden {
+              transform: translateY(-10px);
+              opacity: 0;
+              pointer-events: none;
             }
             
             .reclaim-steps-title {
@@ -139,8 +151,16 @@ export function createProviderVerificationPopup(providerName, description, dataR
             
             .reclaim-status-container {
               margin-top: 15px;
-              overflow: hidden;
-              transition: max-height 0.3s ease;
+              /* Use transform instead of max-height transitions */
+              transform: translateY(10px);
+              opacity: 0;
+              will-change: transform, opacity;
+              transition: transform 0.3s ease, opacity 0.3s ease;
+            }
+            
+            .reclaim-status-container.visible {
+              transform: translateY(0);
+              opacity: 1;
             }
             
             .reclaim-status-progress {
@@ -178,7 +198,11 @@ export function createProviderVerificationPopup(providerName, description, dataR
               width: 0%;
               background-color: #0A84FF;
               border-radius: 2px;
-              transition: width 0.3s ease;
+              /* Use transform instead of width for better performance */
+              transform: scaleX(0);
+              transform-origin: left;
+              will-change: transform;
+              transition: transform 0.3s ease;
             }
             
             .reclaim-progress-bar.success {
@@ -260,10 +284,10 @@ export function createProviderVerificationPopup(providerName, description, dataR
               }
             }
             
-            /* Animations */
+            /* Reduce animation intensity to prevent ResizeObserver loops */
             @keyframes reclaim-progress-pulse {
               0% { opacity: 1; }
-              50% { opacity: 0.6; }
+              50% { opacity: 0.8; }
               100% { opacity: 1; }
             }
             
@@ -355,7 +379,7 @@ export function createProviderVerificationPopup(providerName, description, dataR
                 </div>
             </div>
 
-            <div id="reclaim-status-container" class="reclaim-status-container" style="display: none; max-height: 0;">
+            <div id="reclaim-status-container" class="reclaim-status-container">
                 <div id="reclaim-circular-loader" class="reclaim-circular-loader" style="display: none;">
                     <svg viewBox="25 25 50 50">
                         <circle cx="50" cy="50" r="20"></circle>
@@ -375,7 +399,7 @@ export function createProviderVerificationPopup(providerName, description, dataR
         `;
     }
 
-    // Function to show the loading state
+    // Function to show loader
     function showLoader(message = "Generating verification proof...") {
         const stepsContainer = popup.querySelector('#reclaim-steps-container');
         const statusContainer = popup.querySelector('#reclaim-status-container');
@@ -383,14 +407,13 @@ export function createProviderVerificationPopup(providerName, description, dataR
         const progressContainer = popup.querySelector('#reclaim-status-progress');
         const statusText = popup.querySelector('#reclaim-status-text');
         
-        // Hide the steps
+        // Hide the steps using CSS classes instead of style manipulation
         if (stepsContainer) {
-            stepsContainer.style.display = 'none';
+            stepsContainer.classList.add('hidden');
         }
         
-        // Show the status container and circular loader
-        statusContainer.style.display = 'block';
-        statusContainer.style.maxHeight = '200px';
+        // Show the status container using CSS classes
+        statusContainer.classList.add('visible');
         circularLoader.style.display = 'flex';
         progressContainer.style.display = 'block';
         statusText.textContent = message;
@@ -405,11 +428,12 @@ export function createProviderVerificationPopup(providerName, description, dataR
         const progressCounter = popup.querySelector('#reclaim-progress-counter');
         
         if (state.totalClaims > 0) {
-            const percentage = Math.round((state.completedClaims / state.totalClaims) * 100);
-            progressBar.style.width = `${percentage}%`;
+            const percentage = (state.completedClaims / state.totalClaims);
+            // Use transform instead of width to avoid layout recalculations
+            progressBar.style.transform = `scaleX(${percentage})`;
             progressCounter.textContent = `${state.completedClaims}/${state.totalClaims}`;
         } else {
-            progressBar.style.width = `100%`;
+            progressBar.style.transform = 'scaleX(1)';
             progressBar.style.animation = 'reclaim-progress-pulse 2s infinite';
             progressCounter.textContent = '';
         }
@@ -430,23 +454,35 @@ export function createProviderVerificationPopup(providerName, description, dataR
         const progressContainer = popup.querySelector('#reclaim-status-progress');
         const statusText = popup.querySelector('#reclaim-status-text');
         const progressBar = popup.querySelector('#reclaim-progress-bar');
+        const progressCounter = popup.querySelector('#reclaim-progress-counter');
         
-        // Hide the steps if they're still visible
+        // Hide the steps using CSS classes
         if (stepsContainer) {
-            stepsContainer.style.display = 'none';
+            stepsContainer.classList.add('hidden');
         }
         
         // Hide circular loader
         circularLoader.style.display = 'none';
         
         // Show success UI
-        statusContainer.style.display = 'block';
-        statusContainer.style.maxHeight = '200px';
+        statusContainer.classList.add('visible');
         progressContainer.style.display = 'block';
         statusText.textContent = "Verification complete!";
-        progressBar.style.width = '100%';
-        progressBar.classList.add('success');
-        progressBar.style.animation = 'none';
+        
+        // Ensure progress bar is fully filled - use requestAnimationFrame to ensure DOM is ready
+        requestAnimationFrame(() => {
+            progressBar.style.width = '100%';
+            progressBar.style.transform = 'scaleX(1)';
+            progressBar.classList.add('success');
+            progressBar.style.animation = 'none';
+        });
+        
+        // Update progress counter to show completion
+        if (state.totalClaims > 0) {
+            progressCounter.textContent = `${state.totalClaims}/${state.totalClaims}`;
+        } else {
+            progressCounter.textContent = '100%';
+        }
         
         updateStatusMessage("You will be redirected to the original page shortly.");
         
@@ -475,20 +511,19 @@ export function createProviderVerificationPopup(providerName, description, dataR
         const statusText = popup.querySelector('#reclaim-status-text');
         const progressBar = popup.querySelector('#reclaim-progress-bar');
         
-        // Hide the steps if they're still visible
+        // Hide the steps using CSS classes
         if (stepsContainer) {
-            stepsContainer.style.display = 'none';
+            stepsContainer.classList.add('hidden');
         }
         
         // Hide circular loader
         circularLoader.style.display = 'none';
         
         // Show error UI
-        statusContainer.style.display = 'block';
-        statusContainer.style.maxHeight = '200px';
+        statusContainer.classList.add('visible');
         progressContainer.style.display = 'block';
         statusText.textContent = "Verification failed";
-        progressBar.style.width = '100%';
+        progressBar.style.transform = 'scaleX(1)';
         progressBar.classList.add('error');
         progressBar.style.animation = 'none';
         

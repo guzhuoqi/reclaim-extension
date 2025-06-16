@@ -249,6 +249,11 @@ var options = {
           from: "src/js-scripts",
           to: path.join(__dirname, "build", "js-scripts"),
           force: true,
+          noErrorOnMissing: true,
+          globOptions: {
+            dot: false,
+            ignore: ["**/.*"]
+          }
         },
         {
           from: "public", // Copy from the 'public' directory
