@@ -10,7 +10,13 @@ var WebpackDevServer = require('webpack-dev-server'),
   path = require('path');
 
 var options = config.chromeExtensionBoilerplate || {};
-var excludeEntriesToHotReload = options.notHotReload || [];
+// Exclude extension scripts from hot reloading to prevent webpack-dev-server logs
+var excludeEntriesToHotReload = options.notHotReload || [
+  'background/background',
+  'content/content', 
+  'offscreen/offscreen',
+  'interceptor/network-interceptor'
+];
 
 for (var entryName in config.entry) {
   if (excludeEntriesToHotReload.indexOf(entryName) === -1) {

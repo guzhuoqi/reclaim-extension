@@ -298,4 +298,18 @@ if (env.NODE_ENV === "development") {
   };
 }
 
+// Chrome extension specific configuration
+const chromeExtensionBoilerplate = {
+  // Exclude extension scripts from hot module replacement
+  notHotReload: [
+    'background/background',
+    'content/content', 
+    'offscreen/offscreen',
+    'interceptor/network-interceptor'
+  ]
+};
+
+// Add the extension configuration to the options
+options.chromeExtensionBoilerplate = chromeExtensionBoilerplate;
+
 module.exports = options;

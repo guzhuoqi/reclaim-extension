@@ -26,9 +26,6 @@
   ],
   "host_permissions": ["<all_urls>"],
   "permissions": [
-    "storage",
-    "webRequest",
-    "activeTab",
     "webNavigation",
     "scripting",
     "tabs",
@@ -41,7 +38,7 @@
       "matches": ["<all_urls>"]
     },
     {
-      "resources": ["assets/icons/humanity_protocol_logo.svg", "assets/img/logo.png"],
+      "resources": ["assets/img/logo.png", "assets/img/logo.png"],
       "matches": ["<all_urls>"]
     },
     {
