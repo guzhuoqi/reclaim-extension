@@ -110,6 +110,9 @@ class ReclaimContentScript {
   constructor() {
     // The interceptor should be injected before this constructor runs
     this.init();
+    
+    // Only initialize popup-related properties if this is likely a managed tab
+    // These will be properly set later during initialization
     this.verificationPopup = null;
     this.providerName = 'Emirates';
     this.credentialType = 'Skywards';
@@ -131,6 +134,9 @@ class ReclaimContentScript {
     this.filteredRequests = [];
     this.isFiltering = false;
     this.stopStoringInterceptions = false;
+    
+    // Flag to track if this is a managed tab (will be set during init)
+    this.isManagedTab = false;
   }
 
   init() {
@@ -142,23 +148,41 @@ class ReclaimContentScript {
     }
 
     chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-    // Request provider data from background script and store the response
+    
+    // First verify this is a managed tab before proceeding with initialization
     chrome.runtime.sendMessage({
-      action: MESSAGE_ACTIONS.REQUEST_PROVIDER_DATA,
+      action: MESSAGE_ACTIONS.CHECK_IF_MANAGED_TAB,
       source: MESSAGE_SOURCES.CONTENT_SCRIPT,
       target: MESSAGE_SOURCES.BACKGROUND,
-      data: { url: window.location.href }
+      data: {}
     }, (response) => {
-      if (response.success) {
-        this.providerData = response.data.providerData;
-        this.parameters = response.data.parameters;
-        this.sessionId = response.data.sessionId;
-        this.httpProviderId = response.data.httpProviderId || 'unknown';
-        this.appId = response.data.appId || 'unknown';
-        if (!this.isFiltering) {
-          this.startNetworkFiltering();
-        }
+      if (!response.success || !response.isManaged) {
+        // This tab is not managed by the extension, don't initialize popup-related functionality
+        this.isManagedTab = false;
+        return;
       }
+
+      // Mark this as a managed tab
+      this.isManagedTab = true;
+
+      // Only proceed with provider data request if this is a managed tab
+      chrome.runtime.sendMessage({
+        action: MESSAGE_ACTIONS.REQUEST_PROVIDER_DATA,
+        source: MESSAGE_SOURCES.CONTENT_SCRIPT,
+        target: MESSAGE_SOURCES.BACKGROUND,
+        data: { url: window.location.href }
+      }, (response) => {
+        if (response.success) {
+          this.providerData = response.data.providerData;
+          this.parameters = response.data.parameters;
+          this.sessionId = response.data.sessionId;
+          this.httpProviderId = response.data.httpProviderId || 'unknown';
+          this.appId = response.data.appId || 'unknown';
+          if (!this.isFiltering) {
+            this.startNetworkFiltering();
+          }
+        }
+      });
     });
   }
 
@@ -186,6 +210,12 @@ class ReclaimContentScript {
         break;
 
       case MESSAGE_ACTIONS.PROVIDER_DATA_READY:
+        // Only process provider data if this is a managed tab
+        if (!this.isManagedTab) {
+          sendResponse({ success: false, message: 'Tab is not managed by extension' });
+          break;
+        }
+
         this.providerData = data.providerData;
         this.parameters = data.parameters;
         this.sessionId = data.sessionId;
@@ -206,58 +236,73 @@ class ReclaimContentScript {
         break;
 
       case MESSAGE_ACTIONS.SHOW_PROVIDER_VERIFICATION_POPUP:
-        if (this.verificationPopup) {
-          try {
-            document.body.removeChild(this.verificationPopup.element);
-          } catch (e) {
-            // Silent error handling
-          }
-          this.verificationPopup = null;
-        }
-
-        this.providerName = data?.providerName || this.providerName;
-        this.description = data?.description || this.description;
-        this.dataRequired = data?.dataRequired || this.dataRequired;
-
-        const appendPopupLogic = () => {
-          if (!document.body) {
-            return;
-          }
-          try {
-            this.verificationPopup = createProviderVerificationPopup(
-              this.providerName,
-              this.description,
-              this.dataRequired
-            );
-          } catch (e) {
+        // First check if this tab is managed by the extension before showing popup
+        chrome.runtime.sendMessage({
+          action: MESSAGE_ACTIONS.CHECK_IF_MANAGED_TAB,
+          source: MESSAGE_SOURCES.CONTENT_SCRIPT,
+          target: MESSAGE_SOURCES.BACKGROUND,
+          data: {}
+        }, (response) => {
+          if (!response.success || !response.isManaged) {
+            // This tab is not managed by the extension, don't show popup
+            sendResponse({ success: false, message: 'Tab is not managed by extension' });
             return;
           }
 
-          try {
-            document.body.appendChild(this.verificationPopup.element);
-          } catch (e) {
-            return;
+          // Only proceed with popup creation if this is a managed tab
+          if (this.verificationPopup) {
+            try {
+              document.body.removeChild(this.verificationPopup.element);
+            } catch (e) {
+              // Silent error handling
+            }
+            this.verificationPopup = null;
           }
-        };
 
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', () => {
+          this.providerName = data?.providerName || this.providerName;
+          this.description = data?.description || this.description;
+          this.dataRequired = data?.dataRequired || this.dataRequired;
+
+          const appendPopupLogic = () => {
+            if (!document.body) {
+              return;
+            }
+            try {
+              this.verificationPopup = createProviderVerificationPopup(
+                this.providerName,
+                this.description,
+                this.dataRequired
+              );
+            } catch (e) {
+              return;
+            }
+
+            try {
+              document.body.appendChild(this.verificationPopup.element);
+            } catch (e) {
+              return;
+            }
+          };
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+              appendPopupLogic();
+            }, { once: true });
+          } else {
             appendPopupLogic();
-          }, { once: true });
-        } else {
-          appendPopupLogic();
-        }
+          }
 
-        if (this.appId && this.httpProviderId && this.sessionId) {
-          loggerService.log({
-            message: 'Popup display process initiated and will proceed on DOM readiness.',
-            type: LOG_TYPES.CONTENT,
-            sessionId: this.sessionId,
-            providerId: this.httpProviderId,
-            appId: this.appId
-          });
-        }
-        sendResponse({ success: true, message: 'Popup display process initiated and will proceed on DOM readiness.' });
+          if (this.appId && this.httpProviderId && this.sessionId) {
+            loggerService.log({
+              message: 'Popup display process initiated and will proceed on DOM readiness.',
+              type: LOG_TYPES.CONTENT,
+              sessionId: this.sessionId,
+              providerId: this.httpProviderId,
+              appId: this.appId
+            });
+          }
+          sendResponse({ success: true, message: 'Popup display process initiated and will proceed on DOM readiness.' });
+        });
         break;
 
       // Handle status update messages from background script
