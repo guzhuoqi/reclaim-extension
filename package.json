@@ -1,6 +1,6 @@
 {
   "name": "reclaim-sdk-extension",
-  "version": "0.1.0.900",
+  "version": "1.0.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -10,9 +10,11 @@
     "build": "NODE_ENV=production node utils/build.js",
     "build:webpack": "NODE_ENV=production webpack --config webpack.config.js",
     "dev": "NODE_ENV=development node utils/webserver.js",
+    "setup:browser-rpc": "./script.sh",
     "setup:providers": "node utils/setup-providers.js",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "postinstall": "./script.sh"
   },
   "dependencies": {
     "@extism/extism": "^1.0.3",

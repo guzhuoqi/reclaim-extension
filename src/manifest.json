@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reclaim Extension",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "A chrome extension for Reclaim",
   "icons": {
     "16": "assets/img/logo.png",
