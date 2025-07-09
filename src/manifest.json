@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reclaim Extension",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A chrome extension for Reclaim",
   "icons": {
     "16": "assets/img/logo.png",
@@ -27,7 +27,6 @@
   "host_permissions": ["<all_urls>"],
   "permissions": [
     "webNavigation",
-    "scripting",
     "tabs",
     "offscreen",
     "cookies"
@@ -46,7 +45,7 @@
       "matches": ["<all_urls>"]
     },
     {
-      "resources": ["js-scripts/*.js"],
+      "resources": ["interceptor/injection-scripts.js", "interceptor/injection-scripts.bundle.js"],
       "matches": ["<all_urls>"]
     }
   ]

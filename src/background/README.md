@@ -40,7 +40,7 @@ This directory contains a **modular background service architecture** for browse
 1. **Context Layer**: Shared state and dependencies
 2. **Message Layer**: Event routing and communication
 3. **Session Layer**: Verification lifecycle management
-4. **Tab Layer**: Browser tab management and script injection
+4. **Tab Layer**: Browser tab management
 5. **Processing Layer**: Async proof generation queue
 6. **Utility Layer**: Cookies, logging, and common utilities
 
@@ -145,17 +145,11 @@ export async function startVerification(ctx, templateData) {
         templateData.applicationId
     );
     
-    // 3. Create managed tab and inject scripts
+    // 3. Create managed tab
     chrome.tabs.create({ url: providerData.loginUrl }, (tab) => {
         ctx.activeTabId = tab.id;
         ctx.managedTabs.add(tab.id);
-        
-        // Inject provider-specific script
-        chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: [`js-scripts/${templateData.providerId}.js`],
-            world: 'MAIN'
-        });
+    
     });
     
     return { success: true, message: 'Verification started' };
@@ -178,32 +172,11 @@ export async function startVerification(ctx, templateData) {
 
 ### Tab Management
 
-#### `tabManager.js` - Browser Tab Controller
-**Role**: Manages extension-created tabs and script injection
-
-```javascript
-export function injectProviderScriptForTab(ctx, tabId) {
-    if (!ctx.httpProviderId) return;
-    
-    const scriptUrl = `js-scripts/${ctx.httpProviderId}.js`;
-    chrome.scripting.executeScript({
-        target: { tabId },
-        files: [scriptUrl],
-        world: 'MAIN'
-    }).then(() => {
-        ctx.debugLogger.log(DebugLogType.BACKGROUND, 
-            `Script injected: ${scriptUrl}`);
-    }).catch(error => {
-        ctx.debugLogger.warn(DebugLogType.BACKGROUND, 
-            `Script not found: ${scriptUrl}`, error);
-    });
-}
-```
 
 **Utilities:**
 - `isManagedTab(ctx, tabId)`: Check if tab is managed by extension
 - `removeManagedTab(ctx, tabId)`: Remove tab from managed set
-- `injectProviderScriptForTab(ctx, tabId)`: Inject provider scripts
+- `injectProviderScriptForTab(ctx, tabId)`: No-op function (script injection removed)
 
 ---
 
