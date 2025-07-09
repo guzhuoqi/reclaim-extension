@@ -9,6 +9,7 @@ import { loggerService, LOG_TYPES } from '../utils/logger';
 // Create a flag to track if we should initialize
 let shouldInitialize = false;
 let interceptorInjected = false;
+let injectionScriptInjected = false;
 
 // Function to inject the network interceptor - will be called conditionally
 const injectNetworkInterceptor = function () {
@@ -70,6 +71,66 @@ const injectNetworkInterceptor = function () {
   }
 };
 
+// Function to inject the injection scripts - similar to network interceptor
+const injectDynamicInjectionScript = function () {
+  if (injectionScriptInjected) return;
+
+  try {
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('interceptor/injection-scripts.bundle.js');
+    script.type = 'text/javascript';
+
+    // Set highest priority attributes
+    script.async = false;
+    script.defer = false;
+
+    // Try to inject as early as possible
+    let injected = false;
+
+    // Function to actually inject the script with highest priority
+    const injectNow = () => {
+      if (injected) return;
+
+      if (document.documentElement) {
+        // Use insertBefore for highest priority injection
+        document.documentElement.insertBefore(script, document.documentElement.firstChild);
+        injected = true;
+        injectionScriptInjected = true;
+      } else if (document.head) {
+        document.head.insertBefore(script, document.head.firstChild);
+        injected = true;
+        injectionScriptInjected = true;
+      } else if (document) {
+        document.appendChild(script);
+        injected = true;
+        injectionScriptInjected = true;
+      }
+    };
+
+    // Try to inject immediately
+    injectNow();
+
+    // Also set up a MutationObserver as a fallback
+    if (!injected) {
+      const observer = new MutationObserver(() => {
+        if (!injected && (document.documentElement || document.head)) {
+          injectNow();
+          if (injected) {
+            observer.disconnect();
+          }
+        }
+      });
+
+      // Observe document for any changes at the earliest possible moment
+      observer.observe(document, { childList: true, subtree: true });
+    }
+
+    return script; // Return script element to prevent garbage collection
+  } catch (e) {
+    return null;
+  }
+};
+
 // On load, immediately check if this tab should be initialized
 (async function () {
   try {
@@ -91,6 +152,9 @@ const injectNetworkInterceptor = function () {
         if (shouldInitialize) {
           // If we should initialize, inject the interceptor immediately
           injectNetworkInterceptor();
+          
+          // Also inject the dynamic injection script loader
+          injectDynamicInjectionScript();
 
           // And initialize the content script
           window.reclaimContentScript = new ReclaimContentScript();
@@ -178,6 +242,10 @@ class ReclaimContentScript {
           this.sessionId = response.data.sessionId;
           this.httpProviderId = response.data.httpProviderId || 'unknown';
           this.appId = response.data.appId || 'unknown';
+          
+          // Store provider ID in website's localStorage for injection script access
+          this.setProviderIdInLocalStorage(this.httpProviderId);
+          
           if (!this.isFiltering) {
             this.startNetworkFiltering();
           }
@@ -221,6 +289,10 @@ class ReclaimContentScript {
         this.sessionId = data.sessionId;
         this.httpProviderId = data.httpProviderId || 'unknown';
         this.appId = data.appId || 'unknown';
+        
+        // Store provider ID in website's localStorage for injection script access
+        this.setProviderIdInLocalStorage(this.httpProviderId);
+        
         if (!this.isFiltering) {
           this.startNetworkFiltering();
         }
@@ -396,6 +468,17 @@ class ReclaimContentScript {
       }, '*');
     }
 
+    // Handle provider ID request from injection script
+    if (action === 'RECLAIM_GET_PROVIDER_ID' && event.data.source === 'injection-script') {
+      // Respond with the provider ID from extension context
+      window.postMessage({
+        action: 'RECLAIM_PROVIDER_ID_RESPONSE',
+        providerId: this.httpProviderId || null,
+        source: 'content-script'
+      }, '*');
+      return;
+    }
+
     // Handle intercepted network request
     if (action === MESSAGE_ACTIONS.INTERCEPTED_REQUEST && data) {
       // Store the intercepted request
@@ -443,6 +526,8 @@ class ReclaimContentScript {
         if (data.sessionId) {
           this.sessionId = data.sessionId;
         }
+
+
 
         // Send confirmation back to SDK
         if (response && response.success) {
@@ -726,6 +811,41 @@ class ReclaimContentScript {
     }, (response) => {
       // Background response handled silently
     });
+  }
+
+  // Helper method to store provider ID in website's localStorage
+  setProviderIdInLocalStorage(providerId) {
+    // Don't store null, undefined, or 'unknown' values
+    if (!providerId || providerId === 'unknown') {
+      loggerService.log({
+        message: `Skipping localStorage storage for invalid provider ID: ${providerId}`,
+        type: LOG_TYPES.CONTENT,
+        sessionId: this.sessionId,
+        providerId: this.httpProviderId,
+        appId: this.appId
+      });
+      return;
+    }
+
+    try {
+      console.log('Storing provider ID in localStorage:', providerId);
+      localStorage.setItem('reclaimProviderId', providerId);
+      loggerService.log({
+        message: `Provider ID ${providerId} stored in localStorage.`,
+        type: LOG_TYPES.CONTENT,
+        sessionId: this.sessionId,
+        providerId: this.httpProviderId,
+        appId: this.appId
+      });
+    } catch (e) {
+      loggerService.log({
+        message: `Failed to store provider ID ${providerId} in localStorage: ${e.message}`,
+        type: LOG_TYPES.ERROR,
+        sessionId: this.sessionId,
+        providerId: this.httpProviderId,
+        appId: this.appId
+      });
+    }
   }
 }
 

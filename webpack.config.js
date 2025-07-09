@@ -61,7 +61,8 @@ var options = {
     "background/background": path.join(__dirname, "src", "background", "background.js"),
     "content/content": path.join(__dirname, "src", "content", "content.js"),
     "offscreen/offscreen": path.join(__dirname, "src", "offscreen", "offscreen.js"),
-    "interceptor/network-interceptor": path.join(__dirname, "src", "interceptor", "network-interceptor.js")
+    "interceptor/network-interceptor": path.join(__dirname, "src", "interceptor", "network-interceptor.js"),
+    "interceptor/injection-scripts": path.join(__dirname, "src", "interceptor", "injection-scripts.js")
   },
   output: {
     filename: "[name].bundle.js",
@@ -246,16 +247,6 @@ var options = {
           force: true,
         },
         {
-          from: "src/js-scripts",
-          to: path.join(__dirname, "build", "js-scripts"),
-          force: true,
-          noErrorOnMissing: true,
-          globOptions: {
-            dot: false,
-            ignore: ["**/.*"]
-          }
-        },
-        {
           from: "public", // Copy from the 'public' directory
           to: path.join(__dirname, "build"), // To the root of the 'build' directory
           force: true,
@@ -310,7 +301,8 @@ const chromeExtensionBoilerplate = {
     'background/background',
     'content/content', 
     'offscreen/offscreen',
-    'interceptor/network-interceptor'
+    'interceptor/network-interceptor',
+    'interceptor/injection-scripts'
   ]
 };
 

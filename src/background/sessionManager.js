@@ -72,32 +72,6 @@ export async function startVerification(ctx, templateData) {
 
             ctx.managedTabs.add(tab.id);
 
-            if (templateData.providerId) {
-                const scriptUrl = `js-scripts/${templateData.providerId}.js`;
-
-                chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
-                    files: [scriptUrl],
-                    world: 'MAIN'
-                }).then(() => {
-                    ctx.loggerService.log({
-                        message: `Provider-specific script injected: ${scriptUrl}`,
-                        type: ctx.LOG_TYPES.BACKGROUND,
-                        sessionId: templateData.sessionId || 'unknown',
-                        providerId: templateData.providerId || 'unknown',
-                        appId: templateData.applicationId || 'unknown'
-                    });
-                }).catch(() => {
-                    ctx.loggerService.log({
-                        message: `Provider-specific script not found: ${scriptUrl}`,
-                        type: ctx.LOG_TYPES.BACKGROUND,
-                        sessionId: templateData.sessionId || 'unknown',
-                        providerId: templateData.providerId || 'unknown',
-                        appId: templateData.applicationId || 'unknown'
-                    });
-                });
-            }
-
             const providerName = ctx.providerData?.name || 'Default Provider';
             const description = ctx.providerData?.description || 'Default Description';
             const dataRequired = ctx.providerData?.verificationConfig?.dataRequired || 'Default Data';

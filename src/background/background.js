@@ -145,9 +145,3 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     }
 });
 
-// Listen for navigation events to re-inject scripts
-chrome.webNavigation.onCompleted.addListener((details) => {
-    if (details.frameId === 0 && ctx.managedTabs.has(details.tabId)) {
-        tabManager.injectProviderScriptForTab(ctx, details.tabId);
-    }
-});
