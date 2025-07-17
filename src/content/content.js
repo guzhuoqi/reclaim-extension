@@ -334,6 +334,7 @@ class ReclaimContentScript {
           this.providerName = data?.providerName || this.providerName;
           this.description = data?.description || this.description;
           this.dataRequired = data?.dataRequired || this.dataRequired;
+          this.sessionId = data?.sessionId || this.sessionId;
 
           const appendPopupLogic = () => {
             if (!document.body) {
@@ -343,7 +344,8 @@ class ReclaimContentScript {
               this.verificationPopup = createProviderVerificationPopup(
                 this.providerName,
                 this.description,
-                this.dataRequired
+                this.dataRequired,
+                this.sessionId
               );
             } catch (e) {
               return;

@@ -251,6 +251,17 @@ var options = {
           to: path.join(__dirname, "build"), // To the root of the 'build' directory
           force: true,
         },
+        // Copy component template files
+        {
+          from: "src/content/components/ProviderVerificationPopup.css",
+          to: path.join(__dirname, "build", "content", "components"),
+          force: true,
+        },
+        {
+          from: "src/content/components/ProviderVerificationPopup.html",
+          to: path.join(__dirname, "build", "content", "components"),
+          force: true,
+        },
       ],
     }),
     // Use HtmlWebpackPlugin for the offscreen document to ensure proper bundling
