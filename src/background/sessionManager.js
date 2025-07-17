@@ -75,6 +75,7 @@ export async function startVerification(ctx, templateData) {
             const providerName = ctx.providerData?.name || 'Default Provider';
             const description = ctx.providerData?.description || 'Default Description';
             const dataRequired = ctx.providerData?.verificationConfig?.dataRequired || 'Default Data';
+            const sessionId = ctx.sessionId || 'unknown';
 
             if (tab.id) {
                 const popupMessage = {
@@ -85,6 +86,7 @@ export async function startVerification(ctx, templateData) {
                         providerName,
                         description,
                         dataRequired,
+                        sessionId
                     }
                 };
 
